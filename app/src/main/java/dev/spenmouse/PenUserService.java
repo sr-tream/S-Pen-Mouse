@@ -24,6 +24,8 @@ public final class PenUserService extends IMouseEngine.Stub {
     private volatile Map<String, Integer> selected = new HashMap<>();
     private volatile boolean enabled, quit, running, active, inRange;
     private volatile boolean gesturesSuppressed;
+    private TouchWindows touchWindows;
+    private volatile boolean systemTouchPaused;
     private volatile CameraConfig cameraConfig = new CameraConfig(new Bundle());
     private final CameraInput camera = new CameraInput(new CameraInput.Host() {
         public int findKeyboard() throws Exception {
@@ -35,10 +37,13 @@ public final class PenUserService extends IMouseEngine.Stub {
         public boolean injectKey(KeyEvent e) throws Exception {
             displayId.invoke(e,0);return (boolean)injection.invoke(input,e,0,targetUid);
         }
+        public void checkWindows(){touchWindows.check();}
+        public boolean systemTarget(float x,float y){return touchWindows.systemTarget(x,y,foreground);}
+        public void beginSystemTouch(){pauseForSystemTouch();}
     });
     private final String guardExecutable;
     private final int userId, clientUid;
-    private boolean proxyActive;
+    private boolean proxyActive,proxyAttempted;
     private long lastProxy;
     private long proxyStarted;
     private volatile long bridgeSeen;
@@ -174,6 +179,7 @@ public final class PenUserService extends IMouseEngine.Stub {
         running = true;
         try {
             handle = NativeInput.open();
+            touchWindows=new TouchWindows();
             device = NativeInput.describe(handle);
             guard=NativeInput.guardOpen(guardExecutable,userId);
             Log.i(TAG, "Opened " + device + ", uid=" + android.os.Process.myUid());
@@ -189,7 +195,7 @@ public final class PenUserService extends IMouseEngine.Stub {
                     if (grabbed && (!wanted || uid != targetUid || !foreground.equals(top))) {
                         Log.i(TAG, "Released from " + foreground);
                         camera.suspend();releaseAll(); NativeInput.grab(handle, false); grabbed = false;
-                        active = false; inRange = false;
+                        active = false; inRange = false;systemTouchPaused=false;
                         stopProxy();NativeInput.guardSetActive(guard,false);gesturesSuppressed=false;
                     }
                     foreground = top;
@@ -198,7 +204,8 @@ public final class PenUserService extends IMouseEngine.Stub {
                         if(NativeInput.grab(handle, true)) {
                             grabbed = true;
                             NativeInput.guardSetActive(guard,true);
-                            startProxy();gesturesSuppressed=proxyActive;
+                            if(camera.systemTouch(now))systemTouchPaused=true;else startProxy();
+                            gesturesSuppressed=proxyActive;
                             active = true;
                             Log.i(TAG, "Grabbed for " + top + " uid=" + uid + "; Samsung gestures suppressed");
                         }
@@ -209,6 +216,12 @@ public final class PenUserService extends IMouseEngine.Stub {
                     }
                 }
                 camera.tick(cameraConfig,active,width,height,rotation,density,now);
+                boolean systemTouch=active && (camera.systemTouch(SystemClock.uptimeMillis()) ||
+                    camera.ready() && touchWindows.systemTarget(width/2f,height/2f,foreground));
+                if(systemTouch)pauseForSystemTouch();
+                if(grabbed && systemTouchPaused && !systemTouch) {
+                    systemTouchPaused=false;startProxy();gesturesSuppressed=proxyActive;
+                }
                 if(grabbed && proxyActive && now-lastProxy>=200) {
                     try {proxyEvent(MotionEvent.ACTION_HOVER_MOVE,0);}
                     catch(Throwable e){proxyFailed(e);}
@@ -216,7 +229,7 @@ public final class PenUserService extends IMouseEngine.Stub {
                         proxyFailed(new IllegalStateException("Hover receiver did not confirm delivery"));
                 }
                 int got = NativeInput.read(handle, frame);
-                if (got == 0 || !grabbed) continue;
+                if (got == 0 || !grabbed || systemTouch) continue;
                 if (frame[9] != 0) {
                     releaseAll(); NativeInput.grab(handle, false); grabbed = false;
                     active = false; inRange = false; cooldownUntil = now + 300;
@@ -235,6 +248,7 @@ public final class PenUserService extends IMouseEngine.Stub {
             Log.e(TAG, "Engine", e);
         } finally {
             camera.close();
+            if(touchWindows!=null)touchWindows.close();
             releaseAll();
             stopProxy();
             if (handle != 0) NativeInput.close(handle);
@@ -247,8 +261,13 @@ public final class PenUserService extends IMouseEngine.Stub {
 
     // A transparent 2-pixel window receives these pen events. Target apps receive only mouse events.
     // Samsung's detector uses this state to ignore BLE button/gesture commands without disconnecting.
+    private void pauseForSystemTouch() {
+        if(systemTouchPaused)return;
+        systemTouchPaused=true;releaseAll();inRange=false;stopProxy();gesturesSuppressed=false;
+    }
     private void startProxy() {
         try {
+            proxyAttempted=true;
             // Injected mouse and stylus streams share Android's virtual-device hover state.
             // HOVER_MOVE starts or resumes a session; a duplicate HOVER_ENTER is rejected.
             proxyEvent(MotionEvent.ACTION_HOVER_MOVE,0);proxyActive=true;warning="";proxyStarted=SystemClock.uptimeMillis();
@@ -256,6 +275,7 @@ public final class PenUserService extends IMouseEngine.Stub {
         } catch(Throwable e){proxyFailed(e);}
     }
     private void proxyFailed(Throwable e) {
+        endProxyHover();
         proxyActive=false;gesturesSuppressed=false;
         warning="Мышь работает; подавление Air Actions временно недоступно";
         Log.w(TAG,"Samsung hover bridge unavailable; mouse remains enabled",e);
@@ -275,10 +295,14 @@ public final class PenUserService extends IMouseEngine.Stub {
         } finally {e.recycle();}
     }
     private void stopProxy() {
-        if(!proxyActive)return;
-        try {proxyEvent(MotionEvent.ACTION_HOVER_MOVE,0);proxyEvent(MotionEvent.ACTION_HOVER_EXIT,0);}
-        catch(Throwable e){Log.w(TAG,"Release Samsung hover bridge",e);}
-        proxyActive=false;
+        if(!proxyActive && !proxyAttempted)return;
+        endProxyHover();proxyActive=false;proxyAttempted=false;
+    }
+    private void endProxyHover() {
+        // Delivery can fail after Android's verifier has already registered the pointer.
+        // EXIT must still run if MOVE finds no receiving window.
+        try {proxyEvent(MotionEvent.ACTION_HOVER_MOVE,0);}catch(Throwable ignored){}
+        try {proxyEvent(MotionEvent.ACTION_HOVER_EXIT,0);}catch(Throwable e){Log.d(TAG,"Hover cleanup: "+readable(e));}
     }
 
     private void onFrame(int[] f) throws Exception {
@@ -373,6 +397,7 @@ public final class PenUserService extends IMouseEngine.Stub {
         b.putLong("sent", sent); b.putLong("rejected", rejected);
         b.putInt("width",width);b.putInt("height",height);b.putFloat("density",density);
         b.putBoolean("cameraReady",camera.ready());b.putInt("cameraKeys",camera.held);
+        b.putBoolean("systemTouchPaused",systemTouchPaused);
         b.putLong("keyEvents",camera.keyEvents);b.putLong("blockedTouches",camera.blocked);b.putLong("forwardedTouches",camera.forwarded);
         b.putString("cameraError",camera.error);
         b.putFloat("padLeft",cameraConfig.left(width,height,density));b.putFloat("padTop",cameraConfig.top(width,height,density));

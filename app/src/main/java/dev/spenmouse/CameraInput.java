@@ -10,6 +10,9 @@ final class CameraInput {
     interface Host {
         int findKeyboard() throws Exception;
         boolean injectKey(KeyEvent e) throws Exception;
+        void checkWindows();
+        boolean systemTarget(float x,float y);
+        void beginSystemTouch();
     }
     private final Host host;
     private long handle, retryAt;
@@ -24,11 +27,13 @@ final class CameraInput {
     private int width,height,rotation,keyboard=-1;
     private float density;
     private long lastRepeat;
+    private volatile long systemUntil;
     volatile int held;
     volatile long keyEvents, blocked, forwarded;
     volatile String error="";
     CameraInput(Host host) {this.host=host;Arrays.fill(ids,-1);}
     boolean ready() {return grabbed && !handoff;}
+    boolean systemTouch(long now) {return handoff || now<systemUntil;}
     void tick(CameraConfig config,boolean active,int w,int h,int r,float d,long now) {
         try {
             boolean wanted=active && (config.pad || config.block);
@@ -38,6 +43,7 @@ final class CameraInput {
             if(!wanted) {suspend();drainHandoff();return;}
             if(handoff){drainHandoff();return;}
             if(now<retryAt)return;
+            host.checkWindows();
             if(handle==0) {
                 handle=NativeControls.open();
                 for(int n=0;n<25 && keyboard<0;n++){keyboard=host.findKeyboard();if(keyboard<0)SystemClock.sleep(20);}
@@ -63,6 +69,7 @@ final class CameraInput {
     }
     private void route(CameraConfig config) throws Exception {
         int owner=-1;
+        boolean systemContact=false;
         float ownerX=0,ownerY=0;
         for(int n=0;n<10;n++) {
             int id=frame[5+n*3];pass[n]=0;
@@ -75,16 +82,19 @@ final class CameraInput {
             if(ids[n]!=id) {
                 ids[n]=id;
                 // Preserve the whole gesture if it starts in Android's reserved edge strips.
-                routes[n]=CameraConfig.systemEdge(x,y,width,height,density)?1:
+                routes[n]=CameraConfig.systemEdge(x,y,width,height,density) || host.systemTarget(x,y)?4:
                     config.pad && config.contains(x,y,width,height,density)?2:config.block?3:1;
-                if(routes[n]==1)forwarded++;else blocked++;
+                if(routes[n]==1 || routes[n]==4)forwarded++;else blocked++;
             }
-            pass[n]=routes[n]==1?1:0;
+            pass[n]=routes[n]==1 || routes[n]==4?1:0;
+            if(routes[n]==4)systemContact=true;
             if(routes[n]==2 && owner<0){owner=n;ownerX=x;ownerY=y;}
         }
+        // End injected hover before the first OS/popup DOWN reaches gesture consumers.
+        if(systemContact){systemUntil=SystemClock.uptimeMillis()+500;host.beginSystemTouch();setKeys(0);}
         NativeControls.relay(handle,pass);
         float size=config.size(width,height,density);
-        int mask=owner<0?0:CameraConfig.direction(ownerX-config.left(width,height,density)-size/2,
+        int mask=systemTouch(SystemClock.uptimeMillis()) || owner<0?0:CameraConfig.direction(ownerX-config.left(width,height,density)-size/2,
             ownerY-config.top(width,height,density)-size/2,size/2);
         setKeys(mask);
     }
@@ -124,7 +134,7 @@ final class CameraInput {
                 int id=frame[5+slot*3];
                 if(id<0){ids[slot]=-1;routes[slot]=0;pass[slot]=0;continue;}
                 contact=true;if(ids[slot]!=id){ids[slot]=id;routes[slot]=1;}
-                pass[slot]=routes[slot]==1?1:0;
+                pass[slot]=routes[slot]==1 || routes[slot]==4?1:0;
             }
             NativeControls.relay(handle,pass);
             if(!contact){ungrab();return;}

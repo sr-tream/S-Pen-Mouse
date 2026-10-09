@@ -33,7 +33,9 @@ Touch a direction to hold an arrow key. Diagonals hold two keys, and the center 
 
 Enable **Block other finger touches in the game** to consume finger input outside the pad as well. This option also works with the pad disabled. Mouse events from the S Pen continue to reach the game.
 
-Android edge gestures remain available: touches starting within 32 dp of the left/right edges, 40 dp of the top, or 48 dp of the bottom are forwarded for the entire gesture. These reserved strips also allow game touches through. Controls suspend when the notification shade or another window takes focus, with an ongoing forwarded gesture allowed to finish before capture is released. Arrow keys are released when the finger lifts, settings change, the app loses focus, or emulation stops.
+Touches starting within 32 dp of the left/right edges, 40 dp of the top, or 48 dp of the bottom are forwarded for the entire gesture. These reserved strips also allow game touches through. Touches on system popups, including One Hand Operation+ controls, also pass through. Controls suspend when the notification shade or another window takes focus, with an ongoing forwarded gesture allowed to finish before capture is released. Arrow keys are released when the finger lifts, settings change, the app loses focus, or emulation stops.
+
+On the tested S24 Ultra, bottom Home/Recents gestures work after the S Pen leaves hover range. They remain blocked while the pen is hovering. Move the pen away from the screen before swiping up to minimize the app or open Recents.
 
 The pad's drawing window does not intercept input. The Shizuku engine captures the physical `sec_touchscreen` device, consumes pad touches, and forwards allowed touches through a virtual touchscreen. The S Pen uses its separate input device. This avoids a full-screen touchable overlay that would also intercept injected mouse events. Physical touchscreen capture is released on process exit; no touchscreen settings are changed. Android's software-injected touch events do not pass through this physical-device filter.
 
@@ -47,7 +49,7 @@ A separate recovery process monitors the Shizuku service and restores settings i
 
 Version 0.1.6 was tested on the connected S24 Ultra: hover, left and right clicks, and dragging arrived as `SOURCE_MOUSE` / `TOOL_TYPE_MOUSE`, with no native pen events in the test. The user confirmed that holding the right mouse button did not open the assistant or S Pen menu, and that the pen remained connected after moving it away from the screen and exiting the test.
 
-For version 0.2.0, the user confirmed camera movement, blocking of other finger taps, and working Android edge swipes in Company of Heroes on the same phone. The user also confirmed both built-in diagnostics passed and a five-second pen-button hold opened neither Samsung's menu nor the assistant. The Android/native builds, APK signature, eight-direction geometry, dead zone, and reserved-edge checks passed. Android recognized the relay as an orientation-aware touchscreen and the camera device as a keyboard. Other games and Samsung firmware versions still need separate testing.
+For version 0.2.0, the user confirmed camera movement and blocking of other finger taps in Company of Heroes on the same phone. Follow-up testing confirmed system popup taps work, Back works, and Home/Recents work after the pen leaves hover range; Home/Recents remain blocked during hover. The user also confirmed both built-in diagnostics passed and a five-second pen-button hold opened neither Samsung's menu nor the assistant. The Android/native builds, APK signature, eight-direction geometry, dead zone, and reserved-edge checks passed. Android recognized the relay as an orientation-aware touchscreen and the camera device as a keyboard. Other games and Samsung firmware versions still need separate testing.
 
 ## Building on Windows ARM64
 
@@ -79,6 +81,7 @@ You can also open the project in Android Studio. Prebuilt ARM64 native binaries 
 - `CameraSettingsActivity` / `AppSettingsActivity`: camera controls and per-app cursor preferences.
 - `PenUserService`: foreground app detection and injection of `SOURCE_MOUSE` / `TOOL_TYPE_MOUSE` events restricted to the selected app's UID.
 - `CameraInput` / `CameraConfig`: finger routing, eight-direction geometry, keyboard holds and repeats, and system gesture handoff.
+- `TouchWindows`: read-only window geometry used to pass finger touches to system popups.
 - `input.c`: automatic discovery of `sec_e-pen`, exclusive evdev capture, and creation of a mouse device identity through uinput.
 - `controls.c`: physical touchscreen capture, multitouch forwarding through uinput, and a keyboard device identity for camera arrow keys.
 - `guard.c`: temporary suppression of Samsung actions and restoration of the original settings.
