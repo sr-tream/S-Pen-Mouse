@@ -15,7 +15,7 @@ The default mapping is below. Each app can override it under **Settings → Mous
 | Press and hold the pen button | Press and hold the right mouse button; release the pen button to release |
 | Touch the screen while holding the pen button | Hold both mouse buttons |
 
-The pen button works as a mouse button within the screen digitizer's detection range. Bluetooth Air Actions outside that range do not provide mouse input.
+Default and Inverted use the pen button within the screen digitizer's detection range. In Swap mode, compatible Samsung firmware also supports switching the touch action through Bluetooth outside hover range; touching the screen then sends the selected mouse button.
 
 ## Getting started
 
