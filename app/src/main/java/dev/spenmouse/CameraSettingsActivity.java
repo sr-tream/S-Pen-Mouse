@@ -15,7 +15,7 @@ public final class CameraSettingsActivity extends Activity {
         Button back=new Button(this);back.setText("← Back");back.setOnClickListener(v->finish());root.addView(back);
         text("Camera controls",24);text("Settings apply to the selected apps while mouse emulation is enabled.",14);
         toggle("Enable eight-direction pad","camera_pad");toggle("Block other finger touches in the game","block_touch");
-        text("Android edge swipes remain available for the status bar, Home, Recents and Back. Controls suspend when system UI takes focus.",14);
+        text("Screen-edge gestures and system popup taps pass through. On the tested S24 Ultra, move the pen out of hover range before a Home/Recents swipe.",14);
         preview=new CameraPadView(this);preview.opacity=Prefs.get(this).getInt("pad_opacity",35);
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(dp(140),dp(140));p.gravity=android.view.Gravity.CENTER_HORIZONTAL;root.addView(preview,p);
         slider("Pad opacity",0,100,Prefs.get(this).getInt("pad_opacity",35),v->{Prefs.get(this).edit().putInt("pad_opacity",v).apply();preview.opacity=v;preview.invalidate();},"%");
@@ -24,6 +24,7 @@ public final class CameraSettingsActivity extends Activity {
         slider("Vertical position",0,100,Math.round(Prefs.get(this).getFloat("pad_y",.82f)*100),v->Prefs.get(this).edit().putFloat("pad_y",v/100f).apply(),"%");
         slider("Pad size",88,240,Prefs.get(this).getInt("pad_size",136),v->Prefs.get(this).edit().putInt("pad_size",v).apply()," dp");
         text("Touch a direction to hold its arrow key. Diagonals hold two keys; the center releases them. Lift your finger to stop. Only gestures that start inside the pad control it.",14);
+        text("Hold the center to reveal Settings on the opposite side of the screen. Tap it with another finger to adjust the pad in the game. The button disappears when you lift or leave the center; the open menu stays until Done. Quick settings follow pad opacity with a 15% minimum.",14);
     }
     private void toggle(String title,String key) {
         Switch s=new Switch(this);s.setText(title);s.setTextColor(Color.WHITE);s.setChecked(Prefs.get(this).getBoolean(key,false));root.addView(s);

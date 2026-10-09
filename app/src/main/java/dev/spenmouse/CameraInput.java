@@ -3,6 +3,7 @@ package dev.spenmouse;
 import android.os.SystemClock;
 import android.view.InputDevice;
 import android.view.KeyEvent;
+import android.view.ViewConfiguration;
 import java.util.Arrays;
 
 /** Captures only the physical touchscreen; the S Pen and injected mouse stay independent. */
@@ -13,6 +14,8 @@ final class CameraInput {
         void checkWindows();
         boolean systemTarget(float x,float y);
         void beginSystemTouch();
+        boolean uiTarget(float x,float y);
+        void uiTouches(int[] ids,float[] xs,float[] ys,long now);
     }
     private final Host host;
     private long handle, retryAt;
@@ -21,6 +24,8 @@ final class CameraInput {
     private CameraConfig last;
     private final int[] frame=new int[35], ids=new int[10], routes=new int[10], pass=new int[10];
     private final long[] down=new long[4];
+    private final int[] uiIds=new int[10];
+    private final float[] uiXs=new float[10],uiYs=new float[10];
     private final int[] repeats=new int[4];
     private static final int[] KEYS={KeyEvent.KEYCODE_DPAD_UP,KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_DPAD_DOWN,KeyEvent.KEYCODE_DPAD_LEFT};
     private static final int[] SCANS={103,106,108,105};
@@ -28,18 +33,23 @@ final class CameraInput {
     private float density;
     private long lastRepeat;
     private volatile long systemUntil;
+    final CenterHold centerHold=new CenterHold();
+    private int centerContact=-1;
+    private boolean centerSuppressed;
     volatile int held;
     volatile long keyEvents, blocked, forwarded;
     volatile String error="";
     CameraInput(Host host) {this.host=host;Arrays.fill(ids,-1);}
     boolean ready() {return grabbed && !handoff;}
     boolean systemTouch(long now) {return handoff || now<systemUntil;}
-    void tick(CameraConfig config,boolean active,int w,int h,int r,float d,long now) {
+    void tick(CameraConfig config,boolean active,boolean editing,int w,int h,int r,float d,long now) {
         try {
-            boolean wanted=active && (config.pad || config.block);
-            if(last!=config || rotation!=r || width!=w || height!=h) {
-                suspend();last=config;width=w;height=h;rotation=r;density=d;
+            boolean wanted=active && (config.pad || config.block || editing);
+            if(rotation!=r || width!=w || height!=h || last!=config && !editing) {
+                suspend();
             }
+            last=config;width=w;height=h;rotation=r;density=d;
+            if(editing){centerSuppressed=true;centerHold.clear();setKeys(0);}
             if(!wanted) {suspend();drainHandoff();return;}
             if(handoff){drainHandoff();return;}
             if(now<retryAt)return;
@@ -56,8 +66,10 @@ final class CameraInput {
             for(int n=0;n<40;n++) {
                 if(NativeControls.read(handle,frame)==0)break;
                 if(frame[4]!=0){suspend();retryAt=now+200;return;}
-                route(config);
+                route(config,editing);
             }
+            if(centerContact<0)centerSuppressed=false;
+            centerHold.update(editing || centerSuppressed?-1:centerContact,now,ViewConfiguration.getLongPressTimeout());
             if(held!=0 && now-lastRepeat>=60) {
                 for(int n=0;n<4;n++)if((held&(1<<n))!=0 && now-down[n]>=300)send(n,KeyEvent.ACTION_DOWN,++repeats[n],now);
                 lastRepeat=now;
@@ -67,12 +79,12 @@ final class CameraInput {
             android.util.Log.w("SpenMouseCamera",error,e);close();retryAt=now+2000;
         }
     }
-    private void route(CameraConfig config) throws Exception {
+    private void route(CameraConfig config,boolean editing) throws Exception {
         int owner=-1;
         boolean systemContact=false;
         float ownerX=0,ownerY=0;
         for(int n=0;n<10;n++) {
-            int id=frame[5+n*3];pass[n]=0;
+            int id=frame[5+n*3];pass[n]=0;uiIds[n]=-1;
             if(id<0){ids[n]=-1;routes[n]=0;continue;}
             float u=(float)(frame[6+n*3]-frame[0])/(frame[1]-frame[0]);
             float v=(float)(frame[7+n*3]-frame[2])/(frame[3]-frame[2]);
@@ -82,21 +94,27 @@ final class CameraInput {
             if(ids[n]!=id) {
                 ids[n]=id;
                 // Preserve the whole gesture if it starts in Android's reserved edge strips.
-                routes[n]=CameraConfig.systemEdge(x,y,width,height,density) || host.systemTarget(x,y)?4:
-                    config.pad && config.contains(x,y,width,height,density)?2:config.block?3:1;
+                routes[n]=CameraConfig.systemEdge(x,y,width,height,density) || host.systemTarget(x,y)?4:host.uiTarget(x,y)?5:
+                    config.pad && config.contains(x,y,width,height,density)?2:config.block || editing?3:1;
                 if(routes[n]==1 || routes[n]==4)forwarded++;else blocked++;
             }
             pass[n]=routes[n]==1 || routes[n]==4?1:0;
             if(routes[n]==4)systemContact=true;
+            if(routes[n]==5){systemContact=true;uiIds[n]=id;uiXs[n]=x;uiYs[n]=y;}
             if(routes[n]==2 && owner<0){owner=n;ownerX=x;ownerY=y;}
         }
         // End injected hover before the first OS/popup DOWN reaches gesture consumers.
         if(systemContact){systemUntil=SystemClock.uptimeMillis()+500;host.beginSystemTouch();setKeys(0);}
+        host.uiTouches(uiIds,uiXs,uiYs,SystemClock.uptimeMillis());
         NativeControls.relay(handle,pass);
         float size=config.size(width,height,density);
-        int mask=systemTouch(SystemClock.uptimeMillis()) || owner<0?0:CameraConfig.direction(ownerX-config.left(width,height,density)-size/2,
+        int direction=owner<0?0:CameraConfig.direction(ownerX-config.left(width,height,density)-size/2,
             ownerY-config.top(width,height,density)-size/2,size/2);
-        setKeys(mask);
+        centerContact=config.pad && owner>=0 && direction==0?ids[owner]:-1;
+        // Process every frame so an out-and-back move cannot preserve the old dwell.
+        if(centerContact<0){centerHold.clear();centerSuppressed=false;}
+        else if(!editing && !centerSuppressed)centerHold.update(centerContact,SystemClock.uptimeMillis(),ViewConfiguration.getLongPressTimeout());
+        setKeys(editing || systemTouch(SystemClock.uptimeMillis())?0:direction);
     }
     synchronized void setKeys(int next) throws Exception {
         long now=SystemClock.uptimeMillis();
@@ -112,6 +130,7 @@ final class CameraInput {
         keyEvents++;
     }
     void suspend() {
+        centerContact=-1;centerSuppressed=false;centerHold.clear();
         try {setKeys(0);}catch(Throwable e){android.util.Log.w("SpenMouseCamera","Release keys",e);}
         held=0;
         if(grabbed) {

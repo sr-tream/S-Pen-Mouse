@@ -37,6 +37,16 @@ Touches starting within 32 dp of the left/right edges, 40 dp of the top, or 48 d
 
 On the tested S24 Ultra, bottom Home/Recents gestures work after the S Pen leaves hover range. They remain blocked while the pen is hovering. Move the pen away from the screen before swiping up to minimize the app or open Recents.
 
+### In-game quick settings (0.2.1)
+
+Hold a finger in the pad's center until **Settings** appears outside the pad, preferably on the opposite side of the screen. Keep that finger in the center and tap Settings with another finger. The button hides when the center finger lifts or moves out of the center. Once opened, the menu remains available until **Done**, or until the selected app loses focus.
+
+The menu provides pad position, a touchscreen-blocking toggle, pad size, and pad transparency. Changes apply immediately and use the same saved preferences as the main settings screen. Camera arrow keys and S Pen mouse input pause while the menu is open; finger touches outside the controls are consumed, while screen-edge gestures and system popup taps continue to pass through.
+
+The button and menu use the pad's configured opacity, with a 15% minimum. This leaves quick settings visible even when the pad itself is invisible. The menu stays in place while its position sliders move the pad.
+
+The user confirmed that the menu opens with a second finger and that all four controls work on the tested S24 Ultra. The build, APK signature, and automated center-hold checks also passed. Quick-settings touches are dispatched directly from captured physical contacts into the app's controls; system gestures and other popups continue to use the touchscreen relay.
+
 The pad's drawing window does not intercept input. The Shizuku engine captures the physical `sec_touchscreen` device, consumes pad touches, and forwards allowed touches through a virtual touchscreen. The S Pen uses its separate input device. This avoids a full-screen touchable overlay that would also intercept injected mouse events. Physical touchscreen capture is released on process exit; no touchscreen settings are changed. Android's software-injected touch events do not pass through this physical-device filter.
 
 ## Samsung gestures and connection handling
@@ -79,6 +89,7 @@ You can also open the project in Android Studio. Prebuilt ARM64 native binaries 
 - `MainActivity`: app selection, permissions, and pointer preferences.
 - `MouseService`: foreground notification, Shizuku connection, visible pointer, and the transparent hover receiver.
 - `CameraSettingsActivity` / `AppSettingsActivity`: camera controls and per-app cursor preferences.
+- `PadSettingsOverlay` / `CenterHold`: in-game quick settings and physical-finger center dwell detection.
 - `PenUserService`: foreground app detection and injection of `SOURCE_MOUSE` / `TOOL_TYPE_MOUSE` events restricted to the selected app's UID.
 - `CameraInput` / `CameraConfig`: finger routing, eight-direction geometry, keyboard holds and repeats, and system gesture handoff.
 - `TouchWindows`: read-only window geometry used to pass finger touches to system popups.
@@ -92,6 +103,13 @@ You can also open the project in Android Studio. Prebuilt ARM64 native binaries 
 The transparent receiver occupies 2 × 2 pixels at the center of the screen. Mouse events in that area are shifted by 3 pixels to avoid the receiver. Synthetic hover events contain no button presses; mouse clicks are restricted to the selected app's UID. The receiver acknowledges delivery through Binder, and Samsung's hover state expires automatically if updates stop. Apps that hide third-party overlay windows may prevent Air Actions suppression.
 
 The app does not request network access, Accessibility access, or usage statistics. Other devices require shell access to evdev/uinput and a compatible pen driver; they have not been tested.
+
+The center-hold state check can be run without Android:
+
+```powershell
+javac -d "$env:TEMP\spen-center-hold-check" app/src/main/java/dev/spenmouse/CenterHold.java checks/CenterHoldCheck.java
+java -cp "$env:TEMP\spen-center-hold-check" dev.spenmouse.CenterHoldCheck
+```
 
 ## Dependencies
 

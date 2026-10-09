@@ -24,6 +24,7 @@ public final class MouseService extends Service {
     private CameraPadView cameraPad;
     private boolean padAdded;
     private WindowManager.LayoutParams padParams;
+    private PadSettingsOverlay padSettings;
     private boolean hoverBridgeAdded;
     private volatile long lastBridgeEvent;
     private WindowManager.LayoutParams params;
@@ -86,6 +87,20 @@ public final class MouseService extends Service {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE |
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,PixelFormat.TRANSLUCENT);
         padParams.gravity=Gravity.TOP|Gravity.LEFT;padParams.setFitInsetsTypes(0);padParams.alpha=.7f;padParams.setTitle("S Pen camera pad");
+        ICameraUi callback=new ICameraUi.Stub(){public void touches(Bundle frame){handler.post(()->padSettings.touches(frame));}};
+        padSettings=new PadSettingsOverlay(this,wm,new PadSettingsOverlay.Host() {
+            public boolean beginEditing(long gesture) {
+                if(engine==null)return false;
+                try {
+                    Bundle fresh=engine.getState();
+                    if(!fresh.getBoolean("active") || !fresh.getBoolean("padSettingsReady") || fresh.getLong("padSettingsGesture")!=gesture)return false;
+                    engine.setCameraEditing(true);return true;
+                }catch(RemoteException e){Log.w(TAG,"Open pad settings",e);return false;}
+            }
+            public void endEditing(){if(engine!=null)try{engine.setCameraEditing(false);}catch(RemoteException e){Log.w(TAG,"Close pad settings",e);}}
+            public void changed(){applyConfig();}
+            public void bounds(Bundle bounds){if(engine!=null)try{engine.setCameraUi(bounds,bounds==null?null:callback);}catch(RemoteException e){Log.w(TAG,"Pad settings geometry",e);}}
+        });
         Shizuku.addBinderReceivedListener(received); Shizuku.addBinderDeadListener(dead);
         handler.post(tick);
     }
@@ -146,6 +161,7 @@ public final class MouseService extends Service {
             try {
                 if (engine != null) {engine.updateBridgeHeartbeat(lastBridgeEvent);state = engine.getState();}
                 updatePad();
+                padSettings.update(state);
                 params.alpha=padAdded?.3f:.7f;
                 if (Prefs.cursor(MouseService.this,state.getString("foreground","")) && Settings.canDrawOverlays(MouseService.this)
                         && state.getBoolean("active") && state.getBoolean("inRange")) {
@@ -161,7 +177,7 @@ public final class MouseService extends Service {
                     if (!state.getString("error", "").isEmpty()) text = "Ошибка: откройте S Pen Mouse";
                     getSystemService(NotificationManager.class).notify(1, notification(text));
                 }
-            } catch (Throwable e) { Log.w(TAG, "Status", e); hideCursor();hidePad(); }
+            } catch (Throwable e) { Log.w(TAG, "Status", e); hideCursor();hidePad();padSettings.hide(); }
             handler.postDelayed(this, state.getBoolean("active") && state.getBoolean("inRange") ? 16 : 100);
         }
     };
@@ -184,7 +200,7 @@ public final class MouseService extends Service {
     }
     private void hidePad() {if(padAdded){try{wm.removeView(cameraPad);}catch(Throwable ignored){}padAdded=false;}}
     @Override public void onDestroy() {
-        handler.removeCallbacksAndMessages(null); hideCursor();hidePad();
+        handler.removeCallbacksAndMessages(null); hideCursor();hidePad();padSettings.hide();
         try { if (engine != null) engine.stop(); } catch (Throwable ignored) { }
         try { if (Shizuku.pingBinder()) Shizuku.unbindUserService(args, connection, true); } catch (Throwable ignored) { }
         Shizuku.removeBinderReceivedListener(received); Shizuku.removeBinderDeadListener(dead);

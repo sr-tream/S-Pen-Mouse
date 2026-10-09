@@ -26,6 +26,9 @@ public final class PenUserService extends IMouseEngine.Stub {
     private volatile boolean gesturesSuppressed;
     private TouchWindows touchWindows;
     private volatile boolean systemTouchPaused;
+    private volatile boolean cameraEditing;
+    private record CameraUiTarget(float left,float top,float right,float bottom,long surface,ICameraUi callback) {}
+    private volatile CameraUiTarget cameraUi;
     private volatile CameraConfig cameraConfig = new CameraConfig(new Bundle());
     private final CameraInput camera = new CameraInput(new CameraInput.Host() {
         public int findKeyboard() throws Exception {
@@ -40,6 +43,13 @@ public final class PenUserService extends IMouseEngine.Stub {
         public void checkWindows(){touchWindows.check();}
         public boolean systemTarget(float x,float y){return touchWindows.systemTarget(x,y,foreground);}
         public void beginSystemTouch(){pauseForSystemTouch();}
+        public boolean uiTarget(float x,float y){CameraUiTarget u=cameraUi;return u!=null && x>=u.left && x<u.right && y>=u.top && y<u.bottom;}
+        public void uiTouches(int[] ids,float[] xs,float[] ys,long now) {
+            CameraUiTarget u=cameraUi;if(u==null)return;
+            Bundle b=new Bundle();b.putIntArray("ids",ids.clone());b.putFloatArray("xs",xs.clone());b.putFloatArray("ys",ys.clone());
+            b.putLong("time",now);b.putLong("surface",u.surface);
+            try{u.callback.touches(b);}catch(android.os.RemoteException e){cameraUi=null;cameraEditing=false;}
+        }
     });
     private final String guardExecutable;
     private final int userId, clientUid;
@@ -195,7 +205,7 @@ public final class PenUserService extends IMouseEngine.Stub {
                     if (grabbed && (!wanted || uid != targetUid || !foreground.equals(top))) {
                         Log.i(TAG, "Released from " + foreground);
                         camera.suspend();releaseAll(); NativeInput.grab(handle, false); grabbed = false;
-                        active = false; inRange = false;systemTouchPaused=false;
+                        active = false; inRange = false;systemTouchPaused=false;cameraEditing=false;
                         stopProxy();NativeInput.guardSetActive(guard,false);gesturesSuppressed=false;
                     }
                     foreground = top;
@@ -215,8 +225,8 @@ public final class PenUserService extends IMouseEngine.Stub {
                         if (oldRotation != rotation) { camera.suspend();releaseAll(); inRange = false; }
                     }
                 }
-                camera.tick(cameraConfig,active,width,height,rotation,density,now);
-                boolean systemTouch=active && (camera.systemTouch(SystemClock.uptimeMillis()) ||
+                camera.tick(cameraConfig,active,cameraEditing,width,height,rotation,density,now);
+                boolean systemTouch=active && (cameraEditing || camera.systemTouch(SystemClock.uptimeMillis()) ||
                     camera.ready() && touchWindows.systemTarget(width/2f,height/2f,foreground));
                 if(systemTouch)pauseForSystemTouch();
                 if(grabbed && systemTouchPaused && !systemTouch) {
@@ -254,7 +264,7 @@ public final class PenUserService extends IMouseEngine.Stub {
             if (handle != 0) NativeInput.close(handle);
             if(guard!=0)NativeInput.guardClose(guard);
             gesturesSuppressed=false;
-            active = inRange = running = false; mouseId = -1;
+            active = inRange = running = cameraEditing = false; mouseId = -1;
             Log.i(TAG, "Stopped; S Pen released");
         }
     }
@@ -383,6 +393,11 @@ public final class PenUserService extends IMouseEngine.Stub {
     private static float clamp(float f) { return Math.max(0, Math.min(1, f)); }
     @Override public void updateBridgeHeartbeat(long lastSeen) {bridgeSeen=Math.min(lastSeen,SystemClock.uptimeMillis());}
     @Override public void configureCamera(Bundle settings) {cameraConfig=new CameraConfig(settings==null?new Bundle():settings);}
+    @Override public void setCameraEditing(boolean value) {cameraEditing=value && active;}
+    @Override public void setCameraUi(Bundle bounds,ICameraUi callback) {
+        cameraUi=bounds==null || callback==null?null:new CameraUiTarget(bounds.getFloat("left"),bounds.getFloat("top"),
+            bounds.getFloat("right"),bounds.getFloat("bottom"),bounds.getLong("surface"),callback);
+    }
     private static String readable(Throwable e) {
         while (e.getCause() != null) e = e.getCause();
         return e.getClass().getSimpleName() + ": " + e.getMessage();
@@ -398,6 +413,9 @@ public final class PenUserService extends IMouseEngine.Stub {
         b.putInt("width",width);b.putInt("height",height);b.putFloat("density",density);
         b.putBoolean("cameraReady",camera.ready());b.putInt("cameraKeys",camera.held);
         b.putBoolean("systemTouchPaused",systemTouchPaused);
+        b.putBoolean("cameraEditing",cameraEditing);
+        b.putBoolean("padSettingsReady",camera.centerHold.ready);
+        b.putLong("padSettingsGesture",camera.centerHold.gesture);
         b.putLong("keyEvents",camera.keyEvents);b.putLong("blockedTouches",camera.blocked);b.putLong("forwardedTouches",camera.forwarded);
         b.putString("cameraError",camera.error);
         b.putFloat("padLeft",cameraConfig.left(width,height,density));b.putFloat("padTop",cameraConfig.top(width,height,density));
