@@ -23,6 +23,8 @@ public final class PenUserService extends IMouseEngine.Stub {
     private final Object eventLock = new Object();
     private volatile Map<String, Integer> selected = new HashMap<>();
     private volatile boolean enabled, quit, running, active, inRange;
+    private volatile boolean penInserted;
+    private volatile boolean waitingForPenExit;
     private volatile boolean gesturesSuppressed;
     private TouchWindows touchWindows;
     private volatile boolean systemTouchPaused;
@@ -192,27 +194,34 @@ public final class PenUserService extends IMouseEngine.Stub {
         running = true;
         try {
             handle = NativeInput.open();
+            penInserted = NativeInput.penInserted(handle);
             touchWindows=new TouchWindows();
             device = NativeInput.describe(handle);
             guard=NativeInput.guardOpen(guardExecutable,userId);
-            Log.i(TAG, "Opened " + device + ", uid=" + android.os.Process.myUid());
+            Log.i(TAG, "Opened " + device + ", penInserted=" + penInserted + ", uid=" + android.os.Process.myUid());
             for (int n = 0; n < 30 && mouseId < 0; n++) { findMouse(); if (mouseId < 0) SystemClock.sleep(20); }
             if (mouseId < 0) throw new IllegalStateException("Virtual mouse was not registered");
             while (!quit && enabled) {
                 long now = SystemClock.uptimeMillis();
                 if (now - lastForeground >= 80) {
                     lastForeground = now;
+                    boolean inserted = NativeInput.penInserted(handle);
+                    if (penInserted != inserted) Log.i(TAG, inserted ? "S Pen inserted; pausing controls" : "S Pen ejected; restoring app controls");
+                    penInserted = inserted;
                     String top = topPackage();
                     Integer uid = selected.get(top);
-                    boolean wanted = uid != null && screenUsable() && now >= cooldownUntil;
+                    boolean wanted = !penInserted && uid != null && screenUsable() && now >= cooldownUntil;
+                    waitingForPenExit = wanted && !grabbed;
                     if (grabbed && (!wanted || uid != targetUid || !foreground.equals(top))) {
                         Log.i(TAG, "Released from " + foreground);
-                        camera.suspend();releaseAll(); NativeInput.grab(handle, false); grabbed = false;
+                        camera.suspend();finishMouseSession(); NativeInput.grab(handle, false); grabbed = false;
                         active = false; inRange = false;systemTouchPaused=false;cameraEditing=false;
                         stopProxy();NativeInput.guardSetActive(guard,false);gesturesSuppressed=false;
                     }
                     foreground = top;
-                    if (!grabbed && wanted && frame[3] == 0 && frame[4] == 0) {
+                    // Native capture checks the current buttons and slot state;
+                    // a cached frame can remain stale after docking or ejection.
+                    if (!grabbed && wanted) {
                         updateDisplay(); targetUid = uid;
                         if(NativeInput.grab(handle, true)) {
                             grabbed = true;
@@ -220,6 +229,7 @@ public final class PenUserService extends IMouseEngine.Stub {
                             if(camera.systemTouch(now))systemTouchPaused=true;else startProxy();
                             gesturesSuppressed=proxyActive;
                             active = true;
+                            waitingForPenExit = false;
                             Log.i(TAG, "Grabbed for " + top + " uid=" + uid + "; Samsung gestures suppressed");
                         }
                     } else if (grabbed) {
@@ -270,6 +280,7 @@ public final class PenUserService extends IMouseEngine.Stub {
             if(guard!=0)NativeInput.guardClose(guard);
             gesturesSuppressed=false;
             active = inRange = running = cameraEditing = false; mouseId = -1;
+            waitingForPenExit = false;
             Log.i(TAG, "Stopped; S Pen released");
         }
     }
@@ -395,6 +406,16 @@ public final class PenUserService extends IMouseEngine.Stub {
             buttons = 0; downTime = 0;
         }
     }
+    private void finishMouseSession() {
+        synchronized (eventLock) {
+            releaseAll();
+            if (inRange) {
+                try { emit(MotionEvent.ACTION_HOVER_EXIT, 0, 0); }
+                catch (Throwable e) { Log.w(TAG, "End mouse hover", e); }
+            }
+            inRange = false;
+        }
+    }
     private static float clamp(float f) { return Math.max(0, Math.min(1, f)); }
     @Override public void updateBridgeHeartbeat(long lastSeen) {bridgeSeen=Math.min(lastSeen,SystemClock.uptimeMillis());}
     @Override public synchronized void configureCamera(Bundle profiles) {
@@ -420,6 +441,8 @@ public final class PenUserService extends IMouseEngine.Stub {
         Bundle b = new Bundle();
         b.putBoolean("running", running); b.putBoolean("enabled", enabled);
         b.putBoolean("active", active); b.putBoolean("inRange", inRange);
+        b.putBoolean("penInserted", penInserted);
+        b.putBoolean("waitingForPenExit", waitingForPenExit);
         b.putBoolean("gesturesSuppressed",gesturesSuppressed);
         b.putString("foreground", foreground); b.putString("error", error); b.putString("warning", warning); b.putString("device", device);
         b.putFloat("x", x); b.putFloat("y", y); b.putInt("buttons", buttons); b.putInt("mouseId", mouseId);

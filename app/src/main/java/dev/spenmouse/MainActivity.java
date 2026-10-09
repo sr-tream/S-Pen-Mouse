@@ -130,7 +130,7 @@ public final class MainActivity extends Activity {
         changing=true;master.setChecked(on);changing=false;
         Bundle b=MouseService.state;
         String err=b.getString("error","");
-        status.setText(!err.isEmpty()?"Ошибка подключения": !on?"Выключено": b.getBoolean("active")?"Мышь активна":"Ожидание выбранного приложения");
+        status.setText(!err.isEmpty()?"Ошибка подключения": !on?"Выключено": b.getBoolean("penInserted")?"S Pen stored: controls paused": b.getBoolean("waitingForPenExit")?"Move pen out of hover to resume controls": b.getBoolean("active")?"Мышь активна":"Ожидание выбранного приложения");
         boolean ready=MouseService.ready(), arrow=Settings.canDrawOverlays(this);
         access.setText((ready?"Shizuku: доступ разрешён":"Shizuku: нужен запуск и разрешение")+"\n"+(arrow?"Показ поверх приложений: разрешён":"Показ поверх приложений: требуется для подавления жестов"));
         overlay.setText(arrow?"Настройки показа поверх приложений":"Разрешить показ поверх приложений");

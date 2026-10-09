@@ -174,7 +174,7 @@ public final class MouseService extends Service {
                 long now = SystemClock.uptimeMillis();
                 if (now - lastNotification > 2000) {
                     lastNotification = now;
-                    String text = state.getBoolean("active") ? "Мышь: " + state.getString("foreground", "") : "Ожидание выбранного приложения";
+                    String text = state.getBoolean("penInserted") ? "S Pen stored: controls paused" : state.getBoolean("waitingForPenExit") ? "Move pen out of hover to resume controls" : state.getBoolean("active") ? "Мышь: " + state.getString("foreground", "") : "Ожидание выбранного приложения";
                     if (!state.getString("error", "").isEmpty()) text = "Ошибка: откройте S Pen Mouse";
                     getSystemService(NotificationManager.class).notify(1, notification(text));
                 }

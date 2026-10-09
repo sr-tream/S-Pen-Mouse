@@ -18,6 +18,7 @@ public final class DpadSettingsActivity extends Activity {
         text("Arrow D-pad and finger touch",24);text(getIntent().getStringExtra("label"),18);
         text("Only "+pkg+" uses these settings. The pad sends held keyboard arrow keys, with two keys for diagonals.",14);
         toggle("Enable eight-direction arrow D-pad","pad");toggle("Block other finger touches in this app","block");
+        text("Storing the S Pen pauses finger blocking and hides the D-pad and quick settings. Eject it to restore this app's saved settings automatically.",14);
         text("Screen-edge gestures and system popup taps pass through. On the tested S24 Ultra, move the pen out of hover range before a Home/Recents swipe.",14);
         preview=new CameraPadView(this);preview.opacity=Prefs.dpadOpacity(this,pkg);
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(dp(140),dp(140));p.gravity=android.view.Gravity.CENTER_HORIZONTAL;root.addView(preview,p);

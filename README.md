@@ -35,6 +35,8 @@ Touch a direction to hold an arrow key. Diagonals hold two keys, and the center 
 
 Enable **Block other finger touches in this app** to consume finger input outside the pad as well. This option also works with the pad disabled. Mouse events from the S Pen continue to reach the selected app.
 
+Storing the S Pen in the phone pauses mouse emulation and finger blocking, hides the D-pad and its quick settings, and releases held mouse buttons and arrow keys. The touchscreen then works normally. Ejecting the pen automatically restores the foreground app's saved settings once the pen is outside hover range. If you eject or activate it directly over the screen, move it away once before returning to hover. This lets Android finish its native stylus session before mouse capture begins. Starting emulation with the pen already stored also leaves touch input available. Saved preferences are unchanged.
+
 Touches starting within 32 dp of the left/right edges, 40 dp of the top, or 48 dp of the bottom are forwarded for the entire gesture. These reserved strips also allow game touches through. Touches on system popups, including One Hand Operation+ controls, also pass through. Controls suspend when the notification shade or another window takes focus, with an ongoing forwarded gesture allowed to finish before capture is released. Arrow keys are released when the finger lifts, settings change, the app loses focus, or emulation stops.
 
 On the tested S24 Ultra, bottom Home/Recents gestures work after the S Pen leaves hover range. They remain blocked while the pen is hovering. Move the pen away from the screen before swiping up to minimize the app or open Recents.
@@ -56,6 +58,10 @@ The pad's drawing window does not intercept input. The Shizuku engine captures t
 ## Samsung gestures and connection handling
 
 During emulation, the app temporarily disables the pen-button Air Command shortcut, double-tap actions, and Samsung hover previews. It preserves the main Air Actions setting, which controls the pen's Bluetooth connection. A transparent receiver forwards a synthetic hover session to Samsung's service while selected apps receive mouse events. When emulation ends, the hover session ends and the original settings are restored.
+
+The engine reads the physical pen-slot switch directly, so docking detection continues during exclusive input capture. A switch-only virtual device also relays that switch to Android using Samsung's pen input configuration: exclusive capture otherwise hides the insertion event from Samsung's S Pen service. Docking releases capture and the synthetic hover session, and restores Samsung's gesture settings; ejection resumes suppression in a selected app. Automatic docking pause requires a pen input device exposing `SW_PEN_INSERTED`.
+
+For local 0.2.3, the user confirmed normal finger taps and a hidden pad while stored, followed by working mouse buttons and the D-pad after ejection. The S24 Ultra's raw slot switch is active-low (0 stored, 1 ejected). Capture waits for native hover to end, preventing a stale stylus session from blocking finger input after docking. Native regression checks cover polarity, unchanged raw values in the switch relay, duplicate suppression, capture refusal while stored or hovering, capture after ejection, and devices without a slot switch. All saved app preferences were unchanged after the update.
 
 If delivery of the synthetic hover session cannot be confirmed, mouse emulation continues and the app displays a warning that Air Actions suppression is unavailable.
 
@@ -97,7 +103,7 @@ You can also open the project in Android Studio. Prebuilt ARM64 native binaries 
 - `PenUserService`: foreground app detection and injection of `SOURCE_MOUSE` / `TOOL_TYPE_MOUSE` events restricted to the selected app's UID.
 - `CameraInput` / `CameraConfig`: finger routing, per-app eight-direction geometry, keyboard holds and repeats, and system gesture handoff.
 - `TouchWindows`: read-only window geometry used to pass finger touches to system popups.
-- `input.c`: automatic discovery of `sec_e-pen`, exclusive evdev capture, and creation of a mouse device identity through uinput.
+- `input.c`: discovery of the physical `sec_e-pen`, exclusive evdev capture, a mouse identity, and a switch-only relay using Samsung's pen configuration.
 - `controls.c`: physical touchscreen capture, multitouch forwarding through uinput, and a keyboard device identity for arrow keys.
 - `guard.c`: temporary suppression of Samsung actions and restoration of the original settings.
 - `TestActivity`: manual and automatic mouse input testing.
@@ -122,6 +128,19 @@ $classes = 'app/build/intermediates/javac/debug/compileDebugJavaWithJavac/classe
 $androidJar = "$env:LOCALAPPDATA/Android/Sdk/platforms/android-36/android.jar"
 javac -cp "$classes;$androidJar" -d "$env:TEMP/spen-dpad-preferences-check" checks/DpadPreferencesCheck.java
 java -cp "$env:TEMP/spen-dpad-preferences-check;$classes;$androidJar" dev.spenmouse.DpadPreferencesCheck
+```
+
+The native slot check runs on an ARM64 Android device. It replaces input ioctls and writes with test doubles, so it never opens or captures a real input device:
+
+```powershell
+$spenPrebuilt = "$env:ANDROID_NDK/toolchains/llvm/prebuilt/windows-x86_64"
+$spenCheck = "$env:TEMP/spen-slot-check"
+$spenAdb = "$env:LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe"
+& "$spenPrebuilt/bin/clang.exe" --target=aarch64-linux-android29 "--sysroot=$spenPrebuilt/sysroot" -fPIE -pie -O2 -Wall -Wextra -o $spenCheck checks/PenSlotCheck.c
+& $spenAdb push $spenCheck /data/local/tmp/spen_slot_check
+& $spenAdb shell chmod 755 /data/local/tmp/spen_slot_check
+& $spenAdb shell /data/local/tmp/spen_slot_check
+& $spenAdb shell rm /data/local/tmp/spen_slot_check
 ```
 
 ## Dependencies
