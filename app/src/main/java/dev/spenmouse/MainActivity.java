@@ -18,7 +18,7 @@ import rikka.shizuku.Shizuku;
 
 public final class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private Switch master, cursor;
+    private Switch master;
     private TextView status, details, access;
     private Button permission, overlay;
     private LinearLayout appList;
@@ -34,6 +34,7 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
+        Prefs.migrateCursor(this);
         LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20),dp(14),dp(20),0); root.setBackgroundColor(0xff101820);
         setContentView(root);
@@ -52,10 +53,9 @@ public final class MainActivity extends Activity {
         access = text("",12,0xff9dafb9); root.addView(access);
         permission.setOnClickListener(v -> requestShizuku());
         overlay.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName()))));
-        cursor = new Switch(this); cursor.setText("Дополнительная стрелка"); cursor.setTextColor(Color.WHITE);
-        cursor.setChecked(Prefs.get(this).getBoolean("cursor",true)); root.addView(cursor,full());
-        cursor.setOnCheckedChangeListener((b,on) -> { Prefs.get(this).edit().putBoolean("cursor",on).apply(); refresh(); });
-        root.addView(text("Отключите её, если игра рисует свой курсор.",12,0xff9dafb9));
+        Button camera=button("Camera pad and finger touch settings");root.addView(camera,full());
+        camera.setOnClickListener(v->startActivity(new Intent(this,CameraSettingsActivity.class)));
+        root.addView(text("Дополнительная стрелка задаётся отдельно: кнопка Settings у приложения.",12,0xff9dafb9));
         Button test = button("Проверить мышь и перетаскивание"); root.addView(test,full());
         test.setOnClickListener(v -> startActivity(new Intent(this,TestActivity.class)));
         TextView appTitle = text("ПРИЛОЖЕНИЯ",12,0xff5ce1c3); appTitle.setPadding(0,dp(12),0,dp(4)); root.addView(appTitle);
@@ -114,6 +114,8 @@ public final class MainActivity extends Activity {
             LinearLayout label=new LinearLayout(this);label.setOrientation(LinearLayout.VERTICAL);label.setPadding(dp(12),0,0,0);
             label.addView(text(app.label,15,Color.WHITE));label.addView(text(app.pkg,10,0xff9dafb9));
             row.addView(label,new LinearLayout.LayoutParams(0,-2,1));
+            Button settings=button("Settings");row.addView(settings,new LinearLayout.LayoutParams(dp(80),dp(48)));
+            settings.setOnClickListener(v->startActivity(new Intent(this,AppSettingsActivity.class).putExtra("package",app.pkg).putExtra("label",app.label)));
             CheckBox check=new CheckBox(this);check.setChecked(chosen.contains(app.pkg));row.addView(check);
             check.setOnCheckedChangeListener((b,on) -> {
                 Set<String> set=Prefs.apps(this);if(on)set.add(app.pkg);else set.remove(app.pkg);
@@ -135,7 +137,8 @@ public final class MainActivity extends Activity {
         overlay.setText(arrow?"Настройки показа поверх приложений":"Разрешить показ поверх приложений");
         String info=!err.isEmpty()?err: b.getBoolean("running")?"Экран: "+b.getString("foreground","")+"  ·  Событий: "+b.getLong("sent"):
             "Перо должно быть близко к экрану. Для остановки используйте уведомление.";
-        details.setText(b.getString("warning", "").isEmpty()?info:b.getString("warning"));
+        String cameraError=b.getString("cameraError","");
+        details.setText(!cameraError.isEmpty()?cameraError:b.getString("warning", "").isEmpty()?info:b.getString("warning"));
     }
     private final Runnable refreshLoop=new Runnable(){public void run(){refresh();handler.postDelayed(this,700);}};
     @Override protected void onResume(){super.onResume();

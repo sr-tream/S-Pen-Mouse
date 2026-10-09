@@ -10,6 +10,7 @@ import android.util.Log;
 import android.view.InputDevice;
 import android.view.InputEvent;
 import android.view.MotionEvent;
+import android.view.KeyEvent;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.HashMap;
@@ -23,6 +24,18 @@ public final class PenUserService extends IMouseEngine.Stub {
     private volatile Map<String, Integer> selected = new HashMap<>();
     private volatile boolean enabled, quit, running, active, inRange;
     private volatile boolean gesturesSuppressed;
+    private volatile CameraConfig cameraConfig = new CameraConfig(new Bundle());
+    private final CameraInput camera = new CameraInput(new CameraInput.Host() {
+        public int findKeyboard() throws Exception {
+            int[] ids=(int[])method(input,"getInputDeviceIds").invoke(input);
+            Method get=method(input,"getInputDevice",int.class);
+            for(int id:ids){InputDevice d=(InputDevice)get.invoke(input,id);if(d!=null && d.getName().equals("S Pen Camera Keys"))return id;}
+            return -1;
+        }
+        public boolean injectKey(KeyEvent e) throws Exception {
+            displayId.invoke(e,0);return (boolean)injection.invoke(input,e,0,targetUid);
+        }
+    });
     private final String guardExecutable;
     private final int userId, clientUid;
     private boolean proxyActive;
@@ -35,7 +48,8 @@ public final class PenUserService extends IMouseEngine.Stub {
     private volatile int buttons, mouseId = -1;
     private Thread worker;
     private Object input, tasks, windows, power, displayManager;
-    private Method injection, getTasks, getDisplayInfo, actionButton, displayId;
+    private Method injection, getTasks, getDisplayInfo, actionButton, displayId, visibleWindows;
+    private float density = 3;
     private int targetUid = -1, width = 1080, height = 2340, rotation;
     private long downTime, lastMotion, cooldownUntil;
 
@@ -68,6 +82,7 @@ public final class PenUserService extends IMouseEngine.Stub {
         if (getTasks == null) throw new IllegalStateException("getTasks unavailable");
         getTasks.setAccessible(true);
         windows = service("window", "android.view.IWindowManager");
+        try {visibleWindows=method(windows,"getVisibleWindowInfoList");}catch(ReflectiveOperationException ignored){}
         power = service("power", "android.os.IPowerManager");
         displayManager = Class.forName("android.hardware.display.DisplayManagerGlobal").getMethod("getInstance").invoke(null);
         getDisplayInfo = displayManager.getClass().getMethod("getDisplayInfo", int.class);
@@ -112,6 +127,13 @@ public final class PenUserService extends IMouseEngine.Stub {
         }
         if (first == null) return "";
         ComponentName c = first.topActivity;
+        // Notification shade and other system windows can focus above a still-visible game task.
+        if(visibleWindows!=null) {
+            for(Object w:(List<?>)visibleWindows.invoke(windows)) {
+                if(w.getClass().getField("focused").getBoolean(w) &&
+                    !c.getPackageName().equals(w.getClass().getField("packageName").get(w)))return "";
+            }
+        }
         // Only the test screen of our own app is eligible, never the settings screen.
         if (c.getPackageName().equals("dev.spenmouse") && !c.getClassName().endsWith("TestActivity")) return "";
         return c.getPackageName();
@@ -132,6 +154,7 @@ public final class PenUserService extends IMouseEngine.Stub {
         width = info.getClass().getField("logicalWidth").getInt(info);
         height = info.getClass().getField("logicalHeight").getInt(info);
         rotation = info.getClass().getField("rotation").getInt(info);
+        density = info.getClass().getField("logicalDensityDpi").getInt(info)/160f;
     }
 
     private void findMouse() throws Exception {
@@ -165,7 +188,7 @@ public final class PenUserService extends IMouseEngine.Stub {
                     boolean wanted = uid != null && screenUsable() && now >= cooldownUntil;
                     if (grabbed && (!wanted || uid != targetUid || !foreground.equals(top))) {
                         Log.i(TAG, "Released from " + foreground);
-                        releaseAll(); NativeInput.grab(handle, false); grabbed = false;
+                        camera.suspend();releaseAll(); NativeInput.grab(handle, false); grabbed = false;
                         active = false; inRange = false;
                         stopProxy();NativeInput.guardSetActive(guard,false);gesturesSuppressed=false;
                     }
@@ -182,9 +205,10 @@ public final class PenUserService extends IMouseEngine.Stub {
                     } else if (grabbed) {
                         int oldRotation = rotation;
                         updateDisplay();
-                        if (oldRotation != rotation) { releaseAll(); inRange = false; }
+                        if (oldRotation != rotation) { camera.suspend();releaseAll(); inRange = false; }
                     }
                 }
+                camera.tick(cameraConfig,active,width,height,rotation,density,now);
                 if(grabbed && proxyActive && now-lastProxy>=200) {
                     try {proxyEvent(MotionEvent.ACTION_HOVER_MOVE,0);}
                     catch(Throwable e){proxyFailed(e);}
@@ -210,6 +234,7 @@ public final class PenUserService extends IMouseEngine.Stub {
             error = readable(e); enabled = false;
             Log.e(TAG, "Engine", e);
         } finally {
+            camera.close();
             releaseAll();
             stopProxy();
             if (handle != 0) NativeInput.close(handle);
@@ -224,7 +249,9 @@ public final class PenUserService extends IMouseEngine.Stub {
     // Samsung's detector uses this state to ignore BLE button/gesture commands without disconnecting.
     private void startProxy() {
         try {
-            proxyEvent(MotionEvent.ACTION_HOVER_ENTER,0);proxyActive=true;warning="";proxyStarted=SystemClock.uptimeMillis();
+            // Injected mouse and stylus streams share Android's virtual-device hover state.
+            // HOVER_MOVE starts or resumes a session; a duplicate HOVER_ENTER is rejected.
+            proxyEvent(MotionEvent.ACTION_HOVER_MOVE,0);proxyActive=true;warning="";proxyStarted=SystemClock.uptimeMillis();
             SystemClock.sleep(30);
         } catch(Throwable e){proxyFailed(e);}
     }
@@ -272,7 +299,7 @@ public final class PenUserService extends IMouseEngine.Stub {
         if(Math.abs(x-width/2f)<3 && Math.abs(y-height/2f)<3)x=width/2f+3;
         int next = (f[3] != 0 ? MotionEvent.BUTTON_PRIMARY : 0)
             | (f[4] != 0 ? MotionEvent.BUTTON_SECONDARY : 0);
-        if (!inRange) { inRange = true; emit(MotionEvent.ACTION_HOVER_ENTER, 0, 0); }
+        if (!inRange) { inRange = true; emit(MotionEvent.ACTION_HOVER_MOVE, 0, 0); }
         updateButtons(next);
         long now = SystemClock.uptimeMillis();
         if (now - lastMotion >= 8) {
@@ -298,7 +325,7 @@ public final class PenUserService extends IMouseEngine.Stub {
         buttons = next;
         if (next == 0) {
             emit(MotionEvent.ACTION_UP, 0, 0);
-            emit(MotionEvent.ACTION_HOVER_ENTER, 0, 0);
+            emit(MotionEvent.ACTION_HOVER_MOVE, 0, 0);
             downTime = 0;
         }
     }
@@ -331,6 +358,7 @@ public final class PenUserService extends IMouseEngine.Stub {
     }
     private static float clamp(float f) { return Math.max(0, Math.min(1, f)); }
     @Override public void updateBridgeHeartbeat(long lastSeen) {bridgeSeen=Math.min(lastSeen,SystemClock.uptimeMillis());}
+    @Override public void configureCamera(Bundle settings) {cameraConfig=new CameraConfig(settings==null?new Bundle():settings);}
     private static String readable(Throwable e) {
         while (e.getCause() != null) e = e.getCause();
         return e.getClass().getSimpleName() + ": " + e.getMessage();
@@ -343,7 +371,28 @@ public final class PenUserService extends IMouseEngine.Stub {
         b.putString("foreground", foreground); b.putString("error", error); b.putString("warning", warning); b.putString("device", device);
         b.putFloat("x", x); b.putFloat("y", y); b.putInt("buttons", buttons); b.putInt("mouseId", mouseId);
         b.putLong("sent", sent); b.putLong("rejected", rejected);
+        b.putInt("width",width);b.putInt("height",height);b.putFloat("density",density);
+        b.putBoolean("cameraReady",camera.ready());b.putInt("cameraKeys",camera.held);
+        b.putLong("keyEvents",camera.keyEvents);b.putLong("blockedTouches",camera.blocked);b.putLong("forwardedTouches",camera.forwarded);
+        b.putString("cameraError",camera.error);
+        b.putFloat("padLeft",cameraConfig.left(width,height,density));b.putFloat("padTop",cameraConfig.top(width,height,density));
+        b.putFloat("padSize",cameraConfig.size(width,height,density));
         return b;
+    }
+    @Override public Bundle cameraSelfTest() {
+        Bundle b=new Bundle();
+        if(!active || !foreground.equals("dev.spenmouse") || !camera.ready()) {
+            b.putString("error","Enable camera controls and open the built-in test first");return b;
+        }
+        long identity=android.os.Binder.clearCallingIdentity(),before=camera.keyEvents;
+        try {
+            synchronized(eventLock) {
+                for(int mask:new int[]{1,3,2,6,4,12,8,9}) {camera.setKeys(mask);SystemClock.sleep(180);camera.setKeys(0);SystemClock.sleep(50);}
+            }
+            b.putLong("keys",camera.keyEvents-before);
+        } catch(Throwable e){b.putString("error",readable(e));}
+        finally {try{camera.setKeys(0);}catch(Throwable ignored){}android.os.Binder.restoreCallingIdentity(identity);}
+        Log.i(TAG,"Camera self-test: "+b);return b;
     }
     @Override public Bundle selfTest() {
         Bundle result=new Bundle();

@@ -6,5 +6,7 @@ interface IMouseEngine {
     void stop() = 2;
     Bundle selfTest() = 3;
     void updateBridgeHeartbeat(long lastSeen) = 4;
+    void configureCamera(in Bundle settings) = 5;
+    Bundle cameraSelfTest() = 6;
     void destroy() = 16777114;
 }
