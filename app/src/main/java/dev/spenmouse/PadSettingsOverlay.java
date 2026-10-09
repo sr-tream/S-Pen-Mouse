@@ -56,7 +56,7 @@ final class PadSettingsOverlay {
         width=state.getInt("width");height=state.getInt("height");density=state.getFloat("density",1);
         padSize=state.getFloat("padSize");padCenterX=state.getFloat("padLeft")+padSize/2;
         padCenterY=state.getFloat("padTop")+padSize/2;
-        float opacity=Math.max(.15f,Prefs.get(context).getInt("pad_opacity",35)/100f);
+        float opacity=Math.max(.60f,Prefs.get(context).getInt("pad_opacity",35)/100f);
         gearParams.alpha=menuParams.alpha=opacity;
         if(menuAdded) {
             if(!state.getBoolean("cameraEditing")){hide();return;}
@@ -116,7 +116,7 @@ final class PadSettingsOverlay {
     private void showOpacity() {
         header("D-pad transparency",true);
         slider("Opacity",0,100,Prefs.get(context).getInt("pad_opacity",35),"%",n->Prefs.get(context).edit().putInt("pad_opacity",n).apply());
-        content.addView(label("0% hides the pad. These settings stay at least 15% visible.",13));
+        content.addView(label("0% hides the pad. These settings stay at least 60% visible.",13));
     }
     private interface Changed{void set(int value);}
     private void slider(String title,int min,int max,int value,String unit,Changed changed) {

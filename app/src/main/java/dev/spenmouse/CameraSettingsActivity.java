@@ -24,7 +24,7 @@ public final class CameraSettingsActivity extends Activity {
         slider("Vertical position",0,100,Math.round(Prefs.get(this).getFloat("pad_y",.82f)*100),v->Prefs.get(this).edit().putFloat("pad_y",v/100f).apply(),"%");
         slider("Pad size",88,240,Prefs.get(this).getInt("pad_size",136),v->Prefs.get(this).edit().putInt("pad_size",v).apply()," dp");
         text("Touch a direction to hold its arrow key. Diagonals hold two keys; the center releases them. Lift your finger to stop. Only gestures that start inside the pad control it.",14);
-        text("Hold the center to reveal Settings on the opposite side of the screen. Tap it with another finger to adjust the pad in the game. The button disappears when you lift or leave the center; the open menu stays until Done. Quick settings follow pad opacity with a 15% minimum.",14);
+        text("Hold the center to reveal Settings on the opposite side of the screen. Tap it with another finger to adjust the pad in the game. The button disappears when you lift or leave the center; the open menu stays until Done. Quick settings follow pad opacity with a 60% minimum.",14);
     }
     private void toggle(String title,String key) {
         Switch s=new Switch(this);s.setText(title);s.setTextColor(Color.WHITE);s.setChecked(Prefs.get(this).getBoolean(key,false));root.addView(s);

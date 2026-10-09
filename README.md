@@ -43,7 +43,7 @@ Hold a finger in the pad's center until **Settings** appears outside the pad, pr
 
 The menu provides pad position, a touchscreen-blocking toggle, pad size, and pad transparency. Changes apply immediately and use the same saved preferences as the main settings screen. Camera arrow keys and S Pen mouse input pause while the menu is open; finger touches outside the controls are consumed, while screen-edge gestures and system popup taps continue to pass through.
 
-The button and menu use the pad's configured opacity, with a 15% minimum. This leaves quick settings visible even when the pad itself is invisible. The menu stays in place while its position sliders move the pad.
+The button and menu use the pad's configured opacity, with a 60% minimum. This leaves quick settings visible even when the pad itself is invisible. The menu stays in place while its position sliders move the pad.
 
 The user confirmed that the menu opens with a second finger and that all four controls work on the tested S24 Ultra. The build, APK signature, and automated center-hold checks also passed. Quick-settings touches are dispatched directly from captured physical contacts into the app's controls; system gestures and other popups continue to use the touchscreen relay.
 
