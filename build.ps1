@@ -1,8 +1,11 @@
 param(
-    [string]$SpenNdkPath='C:\Users\SR_team\Projects\android-ndk-r26d',
+    [string]$SpenNdkPath=$env:ANDROID_NDK,
     [string]$SpenSdkPath="$env:LOCALAPPDATA\Android\Sdk"
 )
 $ErrorActionPreference='Stop'
+if ([string]::IsNullOrWhiteSpace($SpenNdkPath)) {
+    throw 'Set ANDROID_NDK to your NDK directory or pass -SpenNdkPath.'
+}
 Push-Location $PSScriptRoot
 try {
     if (!(Test-Path -LiteralPath local.properties)) {

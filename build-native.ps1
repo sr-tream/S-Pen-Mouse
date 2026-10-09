@@ -1,5 +1,8 @@
-param([string]$SpenNdkPath = 'C:\Users\SR_team\Projects\android-ndk-r26d')
+param([string]$SpenNdkPath = $env:ANDROID_NDK)
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($SpenNdkPath)) {
+    throw 'Set ANDROID_NDK to your NDK directory or pass -SpenNdkPath.'
+}
 $SpenRoot = $PSScriptRoot
 $SpenPrebuilt = Join-Path $SpenNdkPath 'toolchains\llvm\prebuilt\windows-x86_64'
 $SpenCompiler = Join-Path $SpenPrebuilt 'bin\clang.exe'

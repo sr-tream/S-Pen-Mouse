@@ -37,19 +37,22 @@ Version 0.1.6 was tested on the connected S24 Ultra: hover, left and right click
 
 ## Building on Windows ARM64
 
-You need JDK 17, Android SDK 36, and NDK r26d with a compiler that runs on Windows ARM64. The scripts default to `C:\Users\SR_team\Projects\android-ndk-r26d` for the NDK and `%LOCALAPPDATA%\Android\Sdk` for the SDK.
+You need JDK 17, Android SDK 36, and NDK r26d with a compiler that runs on Windows ARM64. Both build scripts read the NDK directory from the `ANDROID_NDK` environment variable. The SDK defaults to `%LOCALAPPDATA%\Android\Sdk`.
 
 Run in PowerShell:
 
 ```powershell
+$env:ANDROID_NDK = 'D:\android-ndk-r26d'
 .\build.ps1
 ```
 
-To use different tool locations:
+To override `ANDROID_NDK` or use a different SDK location:
 
 ```powershell
 .\build.ps1 -SpenNdkPath 'D:\android-ndk' -SpenSdkPath 'D:\Android\Sdk'
 ```
+
+If neither `ANDROID_NDK` nor `-SpenNdkPath` is set, the scripts stop with an error explaining how to provide the NDK directory.
 
 The script first compiles the JNI library and recovery process, then uses Gradle to build a signed debug APK at `app/build/outputs/apk/debug/app-debug.apk`. If `debug.keystore` does not exist locally, the script creates it on the first build. Signing keys are excluded from Git and published source archives. Keep your local key for future updates; an APK signed with a different key cannot be installed as an update to the release APK.
 
