@@ -54,6 +54,7 @@ public final class MouseService extends Service {
     @Override public void onCreate() {
         super.onCreate(); alive = true;instance=this;
         Prefs.migrateCursor(this);
+        Prefs.migrateDpad(this);
         NotificationChannel channel = new NotificationChannel(CHANNEL, "Эмуляция мыши", NotificationManager.IMPORTANCE_LOW);
         channel.setDescription("Статус S Pen Mouse и кнопка остановки");
         getSystemService(NotificationManager.class).createNotificationChannel(channel);
@@ -86,14 +87,14 @@ public final class MouseService extends Service {
         padParams=new WindowManager.LayoutParams(1,1,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE |
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,PixelFormat.TRANSLUCENT);
-        padParams.gravity=Gravity.TOP|Gravity.LEFT;padParams.setFitInsetsTypes(0);padParams.alpha=.7f;padParams.setTitle("S Pen camera pad");
+        padParams.gravity=Gravity.TOP|Gravity.LEFT;padParams.setFitInsetsTypes(0);padParams.alpha=.7f;padParams.setTitle("S Pen arrow D-pad");
         ICameraUi callback=new ICameraUi.Stub(){public void touches(Bundle frame){handler.post(()->padSettings.touches(frame));}};
         padSettings=new PadSettingsOverlay(this,wm,new PadSettingsOverlay.Host() {
-            public boolean beginEditing(long gesture) {
+            public boolean beginEditing(String pkg,long gesture) {
                 if(engine==null)return false;
                 try {
                     Bundle fresh=engine.getState();
-                    if(!fresh.getBoolean("active") || !fresh.getBoolean("padSettingsReady") || fresh.getLong("padSettingsGesture")!=gesture)return false;
+                    if(!fresh.getBoolean("active") || !fresh.getBoolean("padSettingsReady") || fresh.getLong("padSettingsGesture")!=gesture || !pkg.equals(fresh.getString("dpadPackage")))return false;
                     engine.setCameraEditing(true);return true;
                 }catch(RemoteException e){Log.w(TAG,"Open pad settings",e);return false;}
             }
@@ -130,7 +131,7 @@ public final class MouseService extends Service {
         }
         int[] ids = new int[uids.size()]; for (int n=0; n<ids.length; n++) ids[n] = uids.get(n);
         try {
-            engine.configureCamera(Prefs.camera(this));
+            engine.configureCamera(Prefs.dpadProfiles(this));
             engine.configure(packages.toArray(new String[0]), ids, Prefs.get(this).getBoolean("enabled", false), hoverBridgeAdded);
         }
         catch (RemoteException e) { Log.e(TAG, "Configure", e); }
@@ -152,7 +153,7 @@ public final class MouseService extends Service {
         new Thread(()->{
             try {
                 Bundle b=s.engine.cameraSelfTest();
-                s.handler.post(()->android.widget.Toast.makeText(context,b.containsKey("error")?b.getString("error"):"Camera key events: "+b.getLong("keys"),android.widget.Toast.LENGTH_LONG).show());
+                s.handler.post(()->android.widget.Toast.makeText(context,b.containsKey("error")?b.getString("error"):"Arrow key events: "+b.getLong("keys"),android.widget.Toast.LENGTH_LONG).show());
             }catch(Throwable e){Log.e(TAG,"Camera self-test",e);}
         },"Camera self-test").start();
     }
@@ -192,10 +193,11 @@ public final class MouseService extends Service {
         if (cursorAdded) { try { wm.removeView(cursor); } catch (Throwable ignored) { } cursorAdded = false; }
     }
     private void updatePad() {
-        if(!state.getBoolean("active") || !state.getBoolean("cameraReady") || !Prefs.get(this).getBoolean("camera_pad",false)) {hidePad();return;}
+        String pkg=state.getString("dpadPackage","");
+        if(!state.getBoolean("active") || !state.getBoolean("cameraReady") || !Prefs.dpadEnabled(this,pkg)) {hidePad();return;}
         padParams.x=Math.round(state.getFloat("padLeft"));padParams.y=Math.round(state.getFloat("padTop"));
         padParams.width=padParams.height=Math.max(1,Math.round(state.getFloat("padSize")));
-        cameraPad.opacity=Prefs.get(this).getInt("pad_opacity",35);cameraPad.held=state.getInt("cameraKeys");cameraPad.invalidate();
+        cameraPad.opacity=Prefs.dpadOpacity(this,pkg);cameraPad.held=state.getInt("cameraKeys");cameraPad.invalidate();
         if(!padAdded){wm.addView(cameraPad,padParams);padAdded=true;}else wm.updateViewLayout(cameraPad,padParams);
     }
     private void hidePad() {if(padAdded){try{wm.removeView(cameraPad);}catch(Throwable ignored){}padAdded=false;}}

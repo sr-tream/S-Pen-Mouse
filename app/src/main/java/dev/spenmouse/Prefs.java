@@ -16,11 +16,36 @@ final class Prefs {
         e.putBoolean("cursor_per_app",true).remove("cursor").apply();
     }
     static boolean cursor(Context c,String pkg) {return get(c).getBoolean("cursor:"+pkg,true);}
-    static Bundle camera(Context c) {
-        SharedPreferences p=get(c);Bundle b=new Bundle();
-        b.putBoolean("pad",p.getBoolean("camera_pad",false));b.putBoolean("block",p.getBoolean("block_touch",false));
-        b.putFloat("horizontal",p.getFloat("pad_x",.12f));b.putFloat("vertical",p.getFloat("pad_y",.82f));
-        b.putFloat("size",p.getInt("pad_size",136));return b;
+    static String dpadKey(String pkg,String setting) {return "dpad:"+pkg+":"+setting;}
+    static void migrateDpad(Context c) {migrateDpad(get(c),apps(c));}
+    static void migrateDpad(SharedPreferences p,Set<String> apps) {
+        if(p.getBoolean("dpad_per_app",false))return;
+        SharedPreferences.Editor e=p.edit();
+        for(String pkg:apps) {
+            if(!p.contains(dpadKey(pkg,"pad")))e.putBoolean(dpadKey(pkg,"pad"),p.getBoolean("camera_pad",false));
+            if(!p.contains(dpadKey(pkg,"block")))e.putBoolean(dpadKey(pkg,"block"),p.getBoolean("block_touch",false));
+            if(!p.contains(dpadKey(pkg,"opacity")))e.putInt(dpadKey(pkg,"opacity"),p.getInt("pad_opacity",35));
+            if(!p.contains(dpadKey(pkg,"horizontal")))e.putFloat(dpadKey(pkg,"horizontal"),p.getFloat("pad_x",.12f));
+            if(!p.contains(dpadKey(pkg,"vertical")))e.putFloat(dpadKey(pkg,"vertical"),p.getFloat("pad_y",.82f));
+            if(!p.contains(dpadKey(pkg,"size")))e.putInt(dpadKey(pkg,"size"),p.getInt("pad_size",136));
+        }
+        e.putBoolean("dpad_per_app",true).remove("camera_pad").remove("block_touch").remove("pad_opacity")
+            .remove("pad_x").remove("pad_y").remove("pad_size").apply();
+    }
+    static boolean dpadEnabled(Context c,String pkg) {return get(c).getBoolean(dpadKey(pkg,"pad"),false);}
+    static boolean dpadBlock(Context c,String pkg) {return get(c).getBoolean(dpadKey(pkg,"block"),false);}
+    static int dpadOpacity(Context c,String pkg) {return get(c).getInt(dpadKey(pkg,"opacity"),35);}
+    static float dpadHorizontal(Context c,String pkg) {return get(c).getFloat(dpadKey(pkg,"horizontal"),.12f);}
+    static float dpadVertical(Context c,String pkg) {return get(c).getFloat(dpadKey(pkg,"vertical"),.82f);}
+    static int dpadSize(Context c,String pkg) {return get(c).getInt(dpadKey(pkg,"size"),136);}
+    static Bundle dpadProfiles(Context c) {
+        Bundle profiles=new Bundle();
+        for(String pkg:apps(c)) {
+            Bundle b=new Bundle();b.putBoolean("pad",dpadEnabled(c,pkg));b.putBoolean("block",dpadBlock(c,pkg));
+            b.putFloat("horizontal",dpadHorizontal(c,pkg));b.putFloat("vertical",dpadVertical(c,pkg));
+            b.putFloat("size",dpadSize(c,pkg));profiles.putBundle(pkg,b);
+        }
+        return profiles;
     }
     static void updateService(Context c) {if(MouseService.alive)c.startService(new android.content.Intent(c,MouseService.class));}
 }

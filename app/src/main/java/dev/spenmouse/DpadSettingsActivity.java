@@ -1,34 +1,38 @@
 package dev.spenmouse;
 import android.app.Activity;
-import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.widget.*;
 
-public final class CameraSettingsActivity extends Activity {
+public final class DpadSettingsActivity extends Activity {
     private LinearLayout root;
     private CameraPadView preview;
+    private String pkg;
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
+        pkg=getIntent().getStringExtra("package");if(pkg==null || pkg.isEmpty()){finish();return;}
+        Prefs.migrateDpad(this);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20),dp(12),dp(20),dp(24));root.setBackgroundColor(0xff101820);scroll.addView(root);setContentView(scroll);
         Button back=new Button(this);back.setText("← Back");back.setOnClickListener(v->finish());root.addView(back);
-        text("Camera controls",24);text("Settings apply to the selected apps while mouse emulation is enabled.",14);
-        toggle("Enable eight-direction pad","camera_pad");toggle("Block other finger touches in the game","block_touch");
+        text("Arrow D-pad and finger touch",24);text(getIntent().getStringExtra("label"),18);
+        text("Only "+pkg+" uses these settings. The pad sends held keyboard arrow keys, with two keys for diagonals.",14);
+        toggle("Enable eight-direction arrow D-pad","pad");toggle("Block other finger touches in this app","block");
         text("Screen-edge gestures and system popup taps pass through. On the tested S24 Ultra, move the pen out of hover range before a Home/Recents swipe.",14);
-        preview=new CameraPadView(this);preview.opacity=Prefs.get(this).getInt("pad_opacity",35);
+        preview=new CameraPadView(this);preview.opacity=Prefs.dpadOpacity(this,pkg);
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(dp(140),dp(140));p.gravity=android.view.Gravity.CENTER_HORIZONTAL;root.addView(preview,p);
-        slider("Pad opacity",0,100,Prefs.get(this).getInt("pad_opacity",35),v->{Prefs.get(this).edit().putInt("pad_opacity",v).apply();preview.opacity=v;preview.invalidate();},"%");
+        slider("Pad opacity",0,100,Prefs.dpadOpacity(this,pkg),v->{Prefs.get(this).edit().putInt(Prefs.dpadKey(pkg,"opacity"),v).apply();preview.opacity=v;preview.invalidate();},"%");
         text("At 0% the pad is invisible but its touch area remains active.",13);
-        slider("Horizontal position",0,100,Math.round(Prefs.get(this).getFloat("pad_x",.12f)*100),v->Prefs.get(this).edit().putFloat("pad_x",v/100f).apply(),"%");
-        slider("Vertical position",0,100,Math.round(Prefs.get(this).getFloat("pad_y",.82f)*100),v->Prefs.get(this).edit().putFloat("pad_y",v/100f).apply(),"%");
-        slider("Pad size",88,240,Prefs.get(this).getInt("pad_size",136),v->Prefs.get(this).edit().putInt("pad_size",v).apply()," dp");
+        slider("Horizontal position",0,100,Math.round(Prefs.dpadHorizontal(this,pkg)*100),v->Prefs.get(this).edit().putFloat(Prefs.dpadKey(pkg,"horizontal"),v/100f).apply(),"%");
+        slider("Vertical position",0,100,Math.round(Prefs.dpadVertical(this,pkg)*100),v->Prefs.get(this).edit().putFloat(Prefs.dpadKey(pkg,"vertical"),v/100f).apply(),"%");
+        slider("Pad size",88,240,Prefs.dpadSize(this,pkg),v->Prefs.get(this).edit().putInt(Prefs.dpadKey(pkg,"size"),v).apply()," dp");
         text("Touch a direction to hold its arrow key. Diagonals hold two keys; the center releases them. Lift your finger to stop. Only gestures that start inside the pad control it.",14);
-        text("Hold the center to reveal Settings on the opposite side of the screen. Tap it with another finger to adjust the pad in the game. The button disappears when you lift or leave the center; the open menu stays until Done. Quick settings follow pad opacity with a 60% minimum.",14);
+        text("Hold the center to reveal Settings on the opposite side of the screen. Tap it with another finger to adjust this app's pad. The button disappears when you lift or leave the center; the open menu stays until Done. Quick settings follow pad opacity with a 60% minimum.",14);
     }
     private void toggle(String title,String key) {
-        Switch s=new Switch(this);s.setText(title);s.setTextColor(Color.WHITE);s.setChecked(Prefs.get(this).getBoolean(key,false));root.addView(s);
-        s.setOnCheckedChangeListener((b,on)->{Prefs.get(this).edit().putBoolean(key,on).apply();Prefs.updateService(this);});
+        String scoped=Prefs.dpadKey(pkg,key);
+        Switch s=new Switch(this);s.setText(title);s.setTextColor(Color.WHITE);s.setChecked(Prefs.get(this).getBoolean(scoped,false));root.addView(s);
+        s.setOnCheckedChangeListener((b,on)->{Prefs.get(this).edit().putBoolean(scoped,on).apply();Prefs.updateService(this);});
     }
     private interface Changed {void set(int v);}
     private void slider(String title,int min,int max,int value,Changed changed,String unit) {
@@ -36,7 +40,7 @@ public final class CameraSettingsActivity extends Activity {
         s.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             public void onProgressChanged(SeekBar b,int n,boolean user){if(user){label.setText(title+": "+(n+min)+unit);changed.set(n+min);}}
             public void onStartTrackingTouch(SeekBar b){}
-            public void onStopTrackingTouch(SeekBar b){Prefs.updateService(CameraSettingsActivity.this);}
+            public void onStopTrackingTouch(SeekBar b){Prefs.updateService(DpadSettingsActivity.this);}
         });
     }
     private TextView text(String value,int size){TextView t=new TextView(this);t.setText(value);t.setTextSize(size);t.setTextColor(Color.WHITE);t.setPadding(0,dp(8),0,dp(6));root.addView(t);return t;}

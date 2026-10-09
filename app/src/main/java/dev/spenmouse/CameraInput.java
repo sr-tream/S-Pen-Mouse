@@ -75,7 +75,7 @@ final class CameraInput {
                 lastRepeat=now;
             }
         } catch(Throwable e) {
-            error="Camera controls unavailable: "+e.getMessage();
+            error="Arrow D-pad controls unavailable: "+e.getMessage();
             android.util.Log.w("SpenMouseCamera",error,e);close();retryAt=now+2000;
         }
     }

@@ -35,6 +35,7 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         Prefs.migrateCursor(this);
+        Prefs.migrateDpad(this);
         LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20),dp(14),dp(20),0); root.setBackgroundColor(0xff101820);
         setContentView(root);
@@ -53,9 +54,7 @@ public final class MainActivity extends Activity {
         access = text("",12,0xff9dafb9); root.addView(access);
         permission.setOnClickListener(v -> requestShizuku());
         overlay.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName()))));
-        Button camera=button("Camera pad and finger touch settings");root.addView(camera,full());
-        camera.setOnClickListener(v->startActivity(new Intent(this,CameraSettingsActivity.class)));
-        root.addView(text("Дополнительная стрелка задаётся отдельно: кнопка Settings у приложения.",12,0xff9dafb9));
+        root.addView(text("Cursor, arrow D-pad and finger touch: Settings beside each app.",12,0xff9dafb9));
         Button test = button("Проверить мышь и перетаскивание"); root.addView(test,full());
         test.setOnClickListener(v -> startActivity(new Intent(this,TestActivity.class)));
         TextView appTitle = text("ПРИЛОЖЕНИЯ",12,0xff5ce1c3); appTitle.setPadding(0,dp(12),0,dp(4)); root.addView(appTitle);

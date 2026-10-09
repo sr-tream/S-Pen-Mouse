@@ -25,27 +25,31 @@ Requirements: Android 13 or later, ARM64, a running Shizuku service, and permiss
 4. Open the built-in test to inspect input events, mouse buttons, and dragging.
 5. Stop emulation with the main switch or the Stop action in the notification.
 
-## Camera pad and finger input
+## Arrow D-pad and finger input
 
-Version 0.2.0 adds an optional eight-direction pad for games that support keyboard arrow keys. Open **Camera pad and finger touch settings** to enable it and adjust its opacity, horizontal position, vertical position, and size. These settings apply to the selected foreground apps; the pad and touch blocking are off by default.
+The optional eight-direction D-pad sends held keyboard arrow keys to the selected app. It can move a game camera when that game uses arrows for camera movement, or perform any other action the app assigns to arrow keys. Open **Settings** beside an app, then **Arrow D-pad and finger touch** to enable it and adjust opacity, horizontal position, vertical position, and size.
 
-Touch a direction to hold an arrow key. Diagonals hold two keys, and the center is a dead zone that releases them. Lift your finger to stop. The pad works independently of S Pen hover, so you can move the camera with a finger while using the pen as a mouse. At 0% opacity, the pad is invisible but its touch area remains active.
+Since 0.2.2, each app keeps its own pad enablement, geometry, opacity, and finger-blocking preference. Upgrading copies the former shared settings to the currently selected apps once; later changes affect only the chosen app. The D-pad and finger blocking are off by default for newly configured apps.
 
-Enable **Block other finger touches in the game** to consume finger input outside the pad as well. This option also works with the pad disabled. Mouse events from the S Pen continue to reach the game.
+Touch a direction to hold an arrow key. Diagonals hold two keys, and the center is a dead zone that releases them. Lift your finger to stop. The pad works independently of S Pen hover, so you can use arrow keys with a finger while using the pen as a mouse. At 0% opacity, the pad is invisible but its touch area remains active.
+
+Enable **Block other finger touches in this app** to consume finger input outside the pad as well. This option also works with the pad disabled. Mouse events from the S Pen continue to reach the selected app.
 
 Touches starting within 32 dp of the left/right edges, 40 dp of the top, or 48 dp of the bottom are forwarded for the entire gesture. These reserved strips also allow game touches through. Touches on system popups, including One Hand Operation+ controls, also pass through. Controls suspend when the notification shade or another window takes focus, with an ongoing forwarded gesture allowed to finish before capture is released. Arrow keys are released when the finger lifts, settings change, the app loses focus, or emulation stops.
 
 On the tested S24 Ultra, bottom Home/Recents gestures work after the S Pen leaves hover range. They remain blocked while the pen is hovering. Move the pen away from the screen before swiping up to minimize the app or open Recents.
 
-### In-game quick settings (0.2.1)
+### In-app quick settings
 
 Hold a finger in the pad's center until **Settings** appears outside the pad, preferably on the opposite side of the screen. Keep that finger in the center and tap Settings with another finger. The button hides when the center finger lifts or moves out of the center. Once opened, the menu remains available until **Done**, or until the selected app loses focus.
 
-The menu provides pad position, a touchscreen-blocking toggle, pad size, and pad transparency. Changes apply immediately and use the same saved preferences as the main settings screen. Camera arrow keys and S Pen mouse input pause while the menu is open; finger touches outside the controls are consumed, while screen-edge gestures and system popup taps continue to pass through.
+The menu provides pad position, a touchscreen-blocking toggle, pad size, and pad transparency. Changes apply immediately to the foreground app and use the same saved preferences as its settings screen. Arrow keys and S Pen mouse input pause while the menu is open; finger touches outside the controls are consumed, while screen-edge gestures and system popup taps continue to pass through. The menu closes when switching apps.
 
-The button and menu use the pad's configured opacity, with a 60% minimum. This leaves quick settings visible even when the pad itself is invisible. The menu stays in place while its position sliders move the pad.
+The button and menu use the pad's configured opacity, with a 60% minimum. Explicit dark button backgrounds and light labels preserve contrast independently of the foreground app's theme. This leaves quick settings visible even when the pad itself is invisible. The menu stays in place while its position sliders move the pad.
 
 The user confirmed that the menu opens with a second finger and that all four controls work on the tested S24 Ultra. The build, APK signature, and automated center-hold checks also passed. Quick-settings touches are dispatched directly from captured physical contacts into the app's controls; system gestures and other popups continue to use the touchscreen relay.
+
+For 0.2.2, the user confirmed the dark popup controls are readable. Automated checks cover app isolation and migration, and the connected phone retained all six D-pad settings for its three selected apps, along with their cursor preferences.
 
 The pad's drawing window does not intercept input. The Shizuku engine captures the physical `sec_touchscreen` device, consumes pad touches, and forwards allowed touches through a virtual touchscreen. The S Pen uses its separate input device. This avoids a full-screen touchable overlay that would also intercept injected mouse events. Physical touchscreen capture is released on process exit; no touchscreen settings are changed. Android's software-injected touch events do not pass through this physical-device filter.
 
@@ -88,13 +92,13 @@ You can also open the project in Android Studio. Prebuilt ARM64 native binaries 
 
 - `MainActivity`: app selection, permissions, and pointer preferences.
 - `MouseService`: foreground notification, Shizuku connection, visible pointer, and the transparent hover receiver.
-- `CameraSettingsActivity` / `AppSettingsActivity`: camera controls and per-app cursor preferences.
+- `DpadSettingsActivity` / `AppSettingsActivity`: per-app arrow D-pad, finger-blocking, and cursor preferences.
 - `PadSettingsOverlay` / `CenterHold`: in-game quick settings and physical-finger center dwell detection.
 - `PenUserService`: foreground app detection and injection of `SOURCE_MOUSE` / `TOOL_TYPE_MOUSE` events restricted to the selected app's UID.
-- `CameraInput` / `CameraConfig`: finger routing, eight-direction geometry, keyboard holds and repeats, and system gesture handoff.
+- `CameraInput` / `CameraConfig`: finger routing, per-app eight-direction geometry, keyboard holds and repeats, and system gesture handoff.
 - `TouchWindows`: read-only window geometry used to pass finger touches to system popups.
 - `input.c`: automatic discovery of `sec_e-pen`, exclusive evdev capture, and creation of a mouse device identity through uinput.
-- `controls.c`: physical touchscreen capture, multitouch forwarding through uinput, and a keyboard device identity for camera arrow keys.
+- `controls.c`: physical touchscreen capture, multitouch forwarding through uinput, and a keyboard device identity for arrow keys.
 - `guard.c`: temporary suppression of Samsung actions and restoration of the original settings.
 - `TestActivity`: manual and automatic mouse input testing.
 
@@ -109,6 +113,15 @@ The center-hold state check can be run without Android:
 ```powershell
 javac -d "$env:TEMP\spen-center-hold-check" app/src/main/java/dev/spenmouse/CenterHold.java checks/CenterHoldCheck.java
 java -cp "$env:TEMP\spen-center-hold-check" dev.spenmouse.CenterHoldCheck
+```
+
+After building the APK, the preferences check verifies legacy migration, preservation of existing values, isolation between apps, defaults for new apps, and repeat migration:
+
+```powershell
+$classes = 'app/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes'
+$androidJar = "$env:LOCALAPPDATA/Android/Sdk/platforms/android-36/android.jar"
+javac -cp "$classes;$androidJar" -d "$env:TEMP/spen-dpad-preferences-check" checks/DpadPreferencesCheck.java
+java -cp "$env:TEMP/spen-dpad-preferences-check;$classes;$androidJar" dev.spenmouse.DpadPreferencesCheck
 ```
 
 ## Dependencies

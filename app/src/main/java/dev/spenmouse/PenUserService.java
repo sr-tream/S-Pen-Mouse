@@ -27,9 +27,12 @@ public final class PenUserService extends IMouseEngine.Stub {
     private TouchWindows touchWindows;
     private volatile boolean systemTouchPaused;
     private volatile boolean cameraEditing;
-    private record CameraUiTarget(float left,float top,float right,float bottom,long surface,ICameraUi callback) {}
+    private record CameraUiTarget(String pkg,float left,float top,float right,float bottom,long surface,ICameraUi callback) {}
     private volatile CameraUiTarget cameraUi;
-    private volatile CameraConfig cameraConfig = new CameraConfig(new Bundle());
+    private static final CameraConfig DEFAULT_DPAD=new CameraConfig(new Bundle());
+    private volatile Map<String,CameraConfig> dpadConfigs=new HashMap<>();
+    private record DpadProfile(String pkg,CameraConfig config) {}
+    private volatile DpadProfile dpadProfile=new DpadProfile("",DEFAULT_DPAD);
     private final CameraInput camera = new CameraInput(new CameraInput.Host() {
         public int findKeyboard() throws Exception {
             int[] ids=(int[])method(input,"getInputDeviceIds").invoke(input);
@@ -43,7 +46,7 @@ public final class PenUserService extends IMouseEngine.Stub {
         public void checkWindows(){touchWindows.check();}
         public boolean systemTarget(float x,float y){return touchWindows.systemTarget(x,y,foreground);}
         public void beginSystemTouch(){pauseForSystemTouch();}
-        public boolean uiTarget(float x,float y){CameraUiTarget u=cameraUi;return u!=null && x>=u.left && x<u.right && y>=u.top && y<u.bottom;}
+        public boolean uiTarget(float x,float y){CameraUiTarget u=cameraUi;return u!=null && foreground.equals(u.pkg) && x>=u.left && x<u.right && y>=u.top && y<u.bottom;}
         public void uiTouches(int[] ids,float[] xs,float[] ys,long now) {
             CameraUiTarget u=cameraUi;if(u==null)return;
             Bundle b=new Bundle();b.putIntArray("ids",ids.clone());b.putFloatArray("xs",xs.clone());b.putFloatArray("ys",ys.clone());
@@ -225,7 +228,9 @@ public final class PenUserService extends IMouseEngine.Stub {
                         if (oldRotation != rotation) { camera.suspend();releaseAll(); inRange = false; }
                     }
                 }
-                camera.tick(cameraConfig,active,cameraEditing,width,height,rotation,density,now);
+                CameraConfig next=dpadConfigs.getOrDefault(foreground,DEFAULT_DPAD);
+                if(!dpadProfile.pkg.equals(foreground) || dpadProfile.config!=next)dpadProfile=new DpadProfile(foreground,next);
+                camera.tick(next,active,cameraEditing,width,height,rotation,density,now);
                 boolean systemTouch=active && (cameraEditing || camera.systemTouch(SystemClock.uptimeMillis()) ||
                     camera.ready() && touchWindows.systemTarget(width/2f,height/2f,foreground));
                 if(systemTouch)pauseForSystemTouch();
@@ -392,10 +397,18 @@ public final class PenUserService extends IMouseEngine.Stub {
     }
     private static float clamp(float f) { return Math.max(0, Math.min(1, f)); }
     @Override public void updateBridgeHeartbeat(long lastSeen) {bridgeSeen=Math.min(lastSeen,SystemClock.uptimeMillis());}
-    @Override public void configureCamera(Bundle settings) {cameraConfig=new CameraConfig(settings==null?new Bundle():settings);}
+    @Override public synchronized void configureCamera(Bundle profiles) {
+        Map<String,CameraConfig> next=new HashMap<>();
+        if(profiles!=null)for(String pkg:profiles.keySet()) {
+            Bundle b=profiles.getBundle(pkg);if(b==null)continue;
+            CameraConfig config=new CameraConfig(b),previous=dpadConfigs.get(pkg);
+            next.put(pkg,config.same(previous)?previous:config);
+        }
+        dpadConfigs=next;
+    }
     @Override public void setCameraEditing(boolean value) {cameraEditing=value && active;}
     @Override public void setCameraUi(Bundle bounds,ICameraUi callback) {
-        cameraUi=bounds==null || callback==null?null:new CameraUiTarget(bounds.getFloat("left"),bounds.getFloat("top"),
+        cameraUi=bounds==null || callback==null?null:new CameraUiTarget(bounds.getString("package",""),bounds.getFloat("left"),bounds.getFloat("top"),
             bounds.getFloat("right"),bounds.getFloat("bottom"),bounds.getLong("surface"),callback);
     }
     private static String readable(Throwable e) {
@@ -403,6 +416,7 @@ public final class PenUserService extends IMouseEngine.Stub {
         return e.getClass().getSimpleName() + ": " + e.getMessage();
     }
     @Override public Bundle getState() {
+        DpadProfile profile=dpadProfile;
         Bundle b = new Bundle();
         b.putBoolean("running", running); b.putBoolean("enabled", enabled);
         b.putBoolean("active", active); b.putBoolean("inRange", inRange);
@@ -418,14 +432,15 @@ public final class PenUserService extends IMouseEngine.Stub {
         b.putLong("padSettingsGesture",camera.centerHold.gesture);
         b.putLong("keyEvents",camera.keyEvents);b.putLong("blockedTouches",camera.blocked);b.putLong("forwardedTouches",camera.forwarded);
         b.putString("cameraError",camera.error);
-        b.putFloat("padLeft",cameraConfig.left(width,height,density));b.putFloat("padTop",cameraConfig.top(width,height,density));
-        b.putFloat("padSize",cameraConfig.size(width,height,density));
+        b.putString("dpadPackage",profile.pkg);
+        b.putFloat("padLeft",profile.config.left(width,height,density));b.putFloat("padTop",profile.config.top(width,height,density));
+        b.putFloat("padSize",profile.config.size(width,height,density));
         return b;
     }
     @Override public Bundle cameraSelfTest() {
         Bundle b=new Bundle();
         if(!active || !foreground.equals("dev.spenmouse") || !camera.ready()) {
-            b.putString("error","Enable camera controls and open the built-in test first");return b;
+            b.putString("error","Enable the arrow D-pad for the built-in test and open it first");return b;
         }
         long identity=android.os.Binder.clearCallingIdentity(),before=camera.keyEvents;
         try {

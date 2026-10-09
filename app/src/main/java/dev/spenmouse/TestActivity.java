@@ -14,7 +14,7 @@ public final class TestActivity extends Activity {
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(0xff101820);
         Button back=new Button(this);back.setText("← Назад к приложениям");back.setAllCaps(false);back.setOnClickListener(v -> finish());root.addView(back);
         Button auto=new Button(this);auto.setText("Автопроверка ЛКМ, ПКМ и перетаскивания");auto.setAllCaps(false);auto.setOnClickListener(v -> MouseService.runSelfTest(this));root.addView(auto);
-        Button keys=new Button(this);keys.setText("Test all eight camera directions");keys.setAllCaps(false);keys.setOnClickListener(v->MouseService.runCameraSelfTest(this));root.addView(keys);
+        Button keys=new Button(this);keys.setText("Test all eight arrow D-pad directions");keys.setAllCaps(false);keys.setOnClickListener(v->MouseService.runCameraSelfTest(this));root.addView(keys);
         testView=new TestView(this);root.addView(testView,new LinearLayout.LayoutParams(-1,0,1));setContentView(root);testView.requestFocus();
     }
     @Override public boolean dispatchKeyEvent(KeyEvent e) {
@@ -60,7 +60,7 @@ public final class TestActivity extends Activity {
             c.drawText("ЛКМ: "+left+"   ПКМ: "+right+"   Hover: "+hover,20*d,68*d,p);
             c.drawText("Перетаскивание: "+drags+"   Событий пера: "+stylus,20*d,94*d,p);
             p.setTextSize(12*d);c.drawText(source,20*d,120*d,p);c.drawText(last,20*d,144*d,p);
-            c.drawText("Camera keys: "+keys+"  held="+held+"  Finger events: "+fingerEvents,20*d,168*d,p);
+            c.drawText("Arrow keys: "+keys+"  held="+held+"  Finger events: "+fingerEvents,20*d,168*d,p);
             c.drawText(lastKey,20*d,192*d,p);
             p.setColor(dragging?0xff5ce1c3:0xff294a57);c.drawRoundRect(box,16*d,16*d,p);
             p.setColor(Color.WHITE);p.setTextSize(14*d);c.drawText("Перетащите меня",box.left+12*d,box.top+30*d,p);

@@ -10,6 +10,7 @@ final class CameraConfig {
         sizeDp=limit(b.getFloat("size",136),88,240);
     }
     static float limit(float x,float low,float high) {return Float.isFinite(x)?Math.max(low,Math.min(high,x)):low;}
+    boolean same(CameraConfig other) {return other!=null && pad==other.pad && block==other.block && horizontal==other.horizontal && vertical==other.vertical && sizeDp==other.sizeDp;}
     float size(int width,int height,float density) {return Math.min(sizeDp*density,Math.min(width-64*density,height-96*density));}
     float left(int width,int height,float density) {float s=size(width,height,density);return 32*density+horizontal*Math.max(0,width-64*density-s);}
     float top(int width,int height,float density) {float s=size(width,height,density);return 40*density+vertical*Math.max(0,height-88*density-s);}

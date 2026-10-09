@@ -1,9 +1,11 @@
 package dev.spenmouse;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.view.InputDevice;
@@ -11,12 +13,13 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.MotionEvent;
 import android.view.WindowManager;
+import android.view.ContextThemeWrapper;
 import android.widget.*;
 
 /** Draws small windows and dispatches captured control touches directly into their views. */
 final class PadSettingsOverlay {
     interface Host {
-        boolean beginEditing(long gesture);
+        boolean beginEditing(String pkg,long gesture);
         void endEditing();
         void changed();
         void bounds(Bundle bounds);
@@ -39,24 +42,26 @@ final class PadSettingsOverlay {
     private float inputX,inputY;
     private View inputView;
     private Bundle lastBounds;
+    private String pkg="";
     PadSettingsOverlay(Context c,WindowManager manager,Host h) {
-        context=c;wm=manager;host=h;
+        context=new ContextThemeWrapper(c,R.style.AppTheme);wm=manager;host=h;
         gear=button("⚙ Settings");gear.setContentDescription("D-pad quick settings");
-        gear.setBackground(background());
         gearParams=params("S Pen D-pad settings button");menuParams=params("S Pen D-pad quick settings");
         gear.setOnClickListener(v->{
-            if(!gearAdded || !host.beginEditing(gesture))return;
+            if(!gearAdded || !host.beginEditing(pkg,gesture))return;
             openedGesture=gesture;hideGear();
             try{showMenu();}catch(Throwable e){closeMenu();android.util.Log.w("SpenMouseClient","Show pad settings",e);}
         });
     }
     void update(Bundle state) {
-        boolean usable=state.getBoolean("active") && state.getBoolean("cameraReady") && Prefs.get(context).getBoolean("camera_pad",false);
+        String next=state.getString("dpadPackage","");
+        if(!pkg.equals(next)){hide();pkg=next;}
+        boolean usable=state.getBoolean("active") && state.getBoolean("cameraReady") && Prefs.dpadEnabled(context,pkg);
         if(!usable){hide();return;}
         width=state.getInt("width");height=state.getInt("height");density=state.getFloat("density",1);
         padSize=state.getFloat("padSize");padCenterX=state.getFloat("padLeft")+padSize/2;
         padCenterY=state.getFloat("padTop")+padSize/2;
-        float opacity=Math.max(.60f,Prefs.get(context).getInt("pad_opacity",35)/100f);
+        float opacity=Math.max(.60f,Prefs.dpadOpacity(context,pkg)/100f);
         gearParams.alpha=menuParams.alpha=opacity;
         if(menuAdded) {
             if(!state.getBoolean("cameraEditing")){hide();return;}
@@ -96,32 +101,35 @@ final class PadSettingsOverlay {
         Button done=button("Done");done.setOnClickListener(v->closeMenu());row.addView(done,new LinearLayout.LayoutParams(dp(64),dp(48)));content.addView(row);
     }
     private void showChoices() {
-        header("D-pad settings",false);
+        header("Arrow D-pad",false);
         choice("1. D-pad position",this::showPosition);
         Switch block=new Switch(context);block.setText("2. Block touchscreen");block.setTextSize(15);block.setTextColor(Color.WHITE);
-        block.setChecked(Prefs.get(context).getBoolean("block_touch",false));content.addView(block,new LinearLayout.LayoutParams(-1,dp(56)));
-        block.setOnCheckedChangeListener((v,on)->{Prefs.get(context).edit().putBoolean("block_touch",on).apply();host.changed();});
+        block.setThumbTintList(new ColorStateList(new int[][]{{android.R.attr.state_checked},{}},new int[]{0xff5ce1c3,0xffa7bbc5}));
+        block.setTrackTintList(new ColorStateList(new int[][]{{android.R.attr.state_checked},{}},new int[]{0xff2b7b6a,0xff354d5b}));
+        block.setChecked(Prefs.dpadBlock(context,pkg));content.addView(block,new LinearLayout.LayoutParams(-1,dp(56)));
+        block.setOnCheckedChangeListener((v,on)->{Prefs.get(context).edit().putBoolean(Prefs.dpadKey(pkg,"block"),on).apply();host.changed();});
         choice("3. D-pad size",this::showSize);
         choice("4. D-pad transparency",this::showOpacity);
     }
     private void showPosition() {
         header("D-pad position",true);
-        slider("Horizontal",0,100,Math.round(Prefs.get(context).getFloat("pad_x",.12f)*100),"%",n->Prefs.get(context).edit().putFloat("pad_x",n/100f).apply());
-        slider("Vertical",0,100,Math.round(Prefs.get(context).getFloat("pad_y",.82f)*100),"%",n->Prefs.get(context).edit().putFloat("pad_y",n/100f).apply());
+        slider("Horizontal",0,100,Math.round(Prefs.dpadHorizontal(context,pkg)*100),"%",n->Prefs.get(context).edit().putFloat(Prefs.dpadKey(pkg,"horizontal"),n/100f).apply());
+        slider("Vertical",0,100,Math.round(Prefs.dpadVertical(context,pkg)*100),"%",n->Prefs.get(context).edit().putFloat(Prefs.dpadKey(pkg,"vertical"),n/100f).apply());
     }
     private void showSize() {
         header("D-pad size",true);
-        slider("Size",88,240,Prefs.get(context).getInt("pad_size",136)," dp",n->Prefs.get(context).edit().putInt("pad_size",n).apply());
+        slider("Size",88,240,Prefs.dpadSize(context,pkg)," dp",n->Prefs.get(context).edit().putInt(Prefs.dpadKey(pkg,"size"),n).apply());
     }
     private void showOpacity() {
         header("D-pad transparency",true);
-        slider("Opacity",0,100,Prefs.get(context).getInt("pad_opacity",35),"%",n->Prefs.get(context).edit().putInt("pad_opacity",n).apply());
+        slider("Opacity",0,100,Prefs.dpadOpacity(context,pkg),"%",n->Prefs.get(context).edit().putInt(Prefs.dpadKey(pkg,"opacity"),n).apply());
         content.addView(label("0% hides the pad. These settings stay at least 60% visible.",13));
     }
     private interface Changed{void set(int value);}
     private void slider(String title,int min,int max,int value,String unit,Changed changed) {
         TextView text=label(title+": "+value+unit,15);content.addView(text);
         SeekBar bar=new SeekBar(context);bar.setMax(max-min);bar.setProgress(value-min);bar.setContentDescription(title);
+        bar.setProgressTintList(ColorStateList.valueOf(0xff5ce1c3));bar.setThumbTintList(ColorStateList.valueOf(0xff5ce1c3));
         content.addView(bar,new LinearLayout.LayoutParams(-1,dp(48)));
         bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             public void onProgressChanged(SeekBar b,int progress,boolean user){if(user){int n=progress+min;text.setText(title+": "+n+unit);changed.set(n);host.changed();}}
@@ -130,7 +138,12 @@ final class PadSettingsOverlay {
         });
     }
     private void choice(String title,Runnable action){Button b=button(title);b.setGravity(Gravity.LEFT|Gravity.CENTER_VERTICAL);b.setOnClickListener(v->action.run());content.addView(b,new LinearLayout.LayoutParams(-1,dp(56)));}
-    private Button button(String title){Button b=new Button(context);b.setText(title);b.setTextSize(13);b.setAllCaps(false);b.setTextColor(Color.WHITE);b.setMinWidth(0);b.setMinimumWidth(0);b.setPadding(dp(4),0,dp(4),0);return b;}
+    private Button button(String title){
+        Button b=new Button(context);b.setText(title);b.setTextSize(13);b.setAllCaps(false);b.setTextColor(Color.WHITE);
+        GradientDrawable shape=new GradientDrawable();shape.setColor(0xff294a57);shape.setCornerRadius(dp(8));shape.setStroke(dp(1),0xff5ce1c3);
+        b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x405ce1c3),shape,null));b.setBackgroundTintList(null);
+        b.setMinWidth(0);b.setMinimumWidth(0);b.setPadding(dp(8),0,dp(8),0);return b;
+    }
     private TextView label(String title,int size){TextView t=new TextView(context);t.setText(title);t.setTextSize(size);t.setTextColor(Color.WHITE);t.setGravity(Gravity.CENTER_VERTICAL);t.setPadding(0,dp(4),0,dp(4));return t;}
     private GradientDrawable background(){GradientDrawable d=new GradientDrawable();d.setColor(0xff102630);d.setCornerRadius(dp(12));d.setStroke(dp(1),0xff5ce1c3);return d;}
     private WindowManager.LayoutParams params(String title) {
@@ -145,6 +158,7 @@ final class PadSettingsOverlay {
         if(lastBounds!=null && lastBounds.getLong("surface")==surface && lastBounds.getFloat("left")==p.x &&
             lastBounds.getFloat("top")==p.y && lastBounds.getFloat("right")==p.x+p.width && lastBounds.getFloat("bottom")==p.y+p.height)return;
         Bundle b=new Bundle();b.putFloat("left",p.x);b.putFloat("top",p.y);b.putFloat("right",p.x+p.width);b.putFloat("bottom",p.y+p.height);b.putLong("surface",surface);
+        b.putString("package",pkg);
         lastBounds=b;host.bounds(b);
     }
     void touches(Bundle frame) {
