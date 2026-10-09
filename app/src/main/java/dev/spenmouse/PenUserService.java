@@ -25,6 +25,12 @@ public final class PenUserService extends IMouseEngine.Stub {
     private volatile boolean enabled, quit, running, active, inRange;
     private volatile boolean globalEnabled, hoverBridgeReady;
     private final LaunchSession launch=new LaunchSession();
+    private record ButtonConfig(int mode,int popupMs) {}
+    private static final ButtonConfig DEFAULT_BUTTONS=new ButtonConfig(MouseButtons.DEFAULT,1500);
+    private volatile Map<String,ButtonConfig> buttonConfigs=new HashMap<>();
+    private final Map<String,MouseButtons> buttonMappers=new HashMap<>();
+    private MouseButtons buttonMapper=new MouseButtons();
+    private final PenButtonSources buttonSources=new PenButtonSources();
     private volatile boolean penInserted;
     private volatile boolean waitingForPenExit;
     private volatile boolean gesturesSuppressed;
@@ -241,6 +247,7 @@ public final class PenUserService extends IMouseEngine.Stub {
                         stopProxy();NativeInput.guardSetActive(guard,false);gesturesSuppressed=false;
                     }
                     foreground = top;
+                    updateButtonProfile(top);
                     // Native capture checks the current buttons and slot state;
                     // a cached frame can remain stale after docking or ejection.
                     if (!grabbed && wanted) {
@@ -356,7 +363,9 @@ public final class PenUserService extends IMouseEngine.Stub {
 
     private void onFrame(int[] f) throws Exception {
         if (f[2] == 0) {
-            releaseAll();
+            buttonSources.frame(false,false,false);
+            buttonMapper.frame(false,buttonSources.button(),SystemClock.uptimeMillis());
+            updateButtons(0);
             if (inRange) emit(MotionEvent.ACTION_HOVER_EXIT, 0, 0);
             inRange = false;
             return;
@@ -370,11 +379,14 @@ public final class PenUserService extends IMouseEngine.Stub {
         x = a * (width-1); y = b * (height-1);
         // Keep real mouse events outside the tiny Samsung-state receiver.
         if(Math.abs(x-width/2f)<3 && Math.abs(y-height/2f)<3)x=width/2f+3;
-        int next = (f[3] != 0 ? MotionEvent.BUTTON_PRIMARY : 0)
-            | (f[4] != 0 ? MotionEvent.BUTTON_SECONDARY : 0);
+        long now = SystemClock.uptimeMillis();
+        long previousSwap=buttonMapper.state().sequence();
+        buttonSources.frame(true,f[3]!=0,f[4]!=0);
+        int next=buttonMapper.frame(buttonSources.tip(),buttonSources.button(),now);
+        MouseButtons.State mapping=buttonMapper.state();
+        if(mapping.sequence()!=previousSwap)Log.i(TAG,"Touch swapped for "+foreground+": "+MouseButtons.label(mapping.oldButton())+" -> "+MouseButtons.label(mapping.newButton()));
         if (!inRange) { inRange = true; emit(MotionEvent.ACTION_HOVER_MOVE, 0, 0); }
         updateButtons(next);
-        long now = SystemClock.uptimeMillis();
         if (now - lastMotion >= 8) {
             emit(buttons == 0 ? MotionEvent.ACTION_HOVER_MOVE : MotionEvent.ACTION_MOVE, buttons, 0);
             lastMotion = now;
@@ -427,6 +439,8 @@ public final class PenUserService extends IMouseEngine.Stub {
                 try { updateButtons(0); } catch (Throwable e) { Log.w(TAG, "Release", e); }
             }
             buttons = 0; downTime = 0;
+            buttonMapper.suspend(SystemClock.uptimeMillis());
+            buttonSources.reset();
         }
     }
     private void finishMouseSession() {
@@ -440,6 +454,37 @@ public final class PenUserService extends IMouseEngine.Stub {
         }
     }
     private static float clamp(float f) { return Math.max(0, Math.min(1, f)); }
+    private void updateButtonProfile(String pkg) {
+        synchronized(eventLock) {
+            MouseButtons mapper=buttonMappers.computeIfAbsent(pkg,k->new MouseButtons());
+            ButtonConfig config=buttonConfigs.getOrDefault(pkg,DEFAULT_BUTTONS);
+            if(buttonMapper!=mapper || mapper.mode()!=config.mode)releaseAll();
+            mapper.configure(config.mode,config.popupMs);buttonMapper=mapper;
+        }
+    }
+    @Override public void configureButtons(Bundle profiles) {
+        Map<String,ButtonConfig> next=new HashMap<>();
+        if(profiles!=null)for(String pkg:profiles.keySet()) {
+            Bundle b=profiles.getBundle(pkg);if(b==null)continue;
+            next.put(pkg,new ButtonConfig(MouseButtons.validMode(b.getInt("mode")),MouseButtons.validPopupMs(b.getInt("popupMs",1500))));
+        }
+        buttonConfigs=next;
+    }
+    @Override public void remoteButton(String pkg,boolean down) {
+        long identity=android.os.Binder.clearCallingIdentity();
+        try {
+            synchronized(eventLock) {
+                if(!enabled || !active || penInserted || systemTouchPaused || cameraEditing || !foreground.equals(pkg) || buttonMapper.mode()!=MouseButtons.SWAP)return;
+                long now=SystemClock.uptimeMillis(),previous=buttonMapper.state().sequence();
+                buttonSources.remote(down);
+                int next=buttonMapper.frame(buttonSources.tip(),buttonSources.button(),now);
+                MouseButtons.State mapping=buttonMapper.state();
+                if(mapping.sequence()!=previous)Log.i(TAG,"Bluetooth touch swap for "+pkg+": "+MouseButtons.label(mapping.oldButton())+" -> "+MouseButtons.label(mapping.newButton()));
+                if(inRange)updateButtons(next);
+            }
+        }catch(Throwable e){Log.w(TAG,"Bluetooth button",e);}
+        finally{android.os.Binder.restoreCallingIdentity(identity);}
+    }
     @Override public void updateBridgeHeartbeat(long lastSeen) {bridgeSeen=Math.min(lastSeen,SystemClock.uptimeMillis());}
     @Override public synchronized void configureCamera(Bundle profiles) {
         Map<String,CameraConfig> next=new HashMap<>();
@@ -464,6 +509,12 @@ public final class PenUserService extends IMouseEngine.Stub {
         Bundle b = new Bundle();
         b.putBoolean("running", running); b.putBoolean("enabled", enabled);
         b.putString("launchPackage",launch.packageName());
+        synchronized(eventLock) {
+            MouseButtons.State mapping=buttonMapper.state();
+            b.putInt("buttonMode",mapping.mode());b.putInt("touchButton",mapping.touchButton());b.putInt("swapPopupMs",mapping.popupMs());
+            b.putBoolean("swapHeld",mapping.swapHeld());b.putLong("swapSequence",mapping.sequence());b.putLong("swapReleasedAt",mapping.releasedAt());
+            b.putInt("swapOldButton",mapping.oldButton());b.putInt("swapNewButton",mapping.newButton());
+        }
         b.putBoolean("active", active); b.putBoolean("inRange", inRange);
         b.putBoolean("penInserted", penInserted);
         b.putBoolean("waitingForPenExit", waitingForPenExit);
@@ -507,12 +558,17 @@ public final class PenUserService extends IMouseEngine.Stub {
         long before=sent, failed=rejected;
         try {
             synchronized(eventLock) {
+                updateButtonProfile(foreground);
+                int initialTouch=buttonMapper.touchButton();
                 testFrame(.5f,.66f,0,0,1);SystemClock.sleep(100);
-                testFrame(.5f,.66f,1,0,1);SystemClock.sleep(250);
-                testFrame(.68f,.70f,1,0,1);SystemClock.sleep(100);
-                testFrame(.68f,.70f,0,0,1);SystemClock.sleep(100);
-                testFrame(.6f,.5f,0,1,1);SystemClock.sleep(100);
-                testFrame(.6f,.5f,0,0,1);SystemClock.sleep(100);
+                testButtonFrame(.5f,.66f,MouseButtons.LMB,true);SystemClock.sleep(250);
+                testButtonFrame(.68f,.70f,MouseButtons.LMB,true);SystemClock.sleep(100);
+                testButtonFrame(.68f,.70f,MouseButtons.LMB,false);SystemClock.sleep(100);
+                testButtonFrame(.6f,.5f,MouseButtons.RMB,true);SystemClock.sleep(100);
+                testButtonFrame(.6f,.5f,MouseButtons.RMB,false);SystemClock.sleep(100);
+                if(buttonMapper.mode()==MouseButtons.SWAP && buttonMapper.touchButton()!=initialTouch) {
+                    testFrame(.6f,.5f,0,1,1);testFrame(.6f,.5f,0,0,1);
+                }
                 testFrame(.6f,.5f,0,0,0);
             }
             result.putLong("sent",sent-before);result.putLong("rejected",rejected-failed);
@@ -524,6 +580,17 @@ public final class PenUserService extends IMouseEngine.Stub {
         float u=a,v=b;
         if(rotation==1){u=1-b;v=a;}else if(rotation==2){u=1-a;v=1-b;}else if(rotation==3){u=b;v=1-a;}
         onFrame(new int[]{Math.round(u*10000),Math.round(v*10000),range,tip,barrel,0,10000,0,10000,0});
+    }
+    private void testButtonFrame(float a,float b,int button,boolean pressed) throws Exception {
+        if(!pressed){testFrame(a,b,0,0,1);return;}
+        if(buttonMapper.mode()==MouseButtons.SWAP) {
+            if(buttonMapper.touchButton()!=button) {
+                testFrame(a,b,0,0,1);testFrame(a,b,0,1,1);testFrame(a,b,0,0,1);
+            }
+            testFrame(a,b,1,0,1);
+        } else {
+            boolean tip=button==buttonMapper.touchButton();testFrame(a,b,tip?1:0,tip?0:1,1);
+        }
     }
     @Override public synchronized void stop() {
         globalEnabled=false;launch.clear();enabled = false;

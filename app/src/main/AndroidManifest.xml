@@ -4,7 +4,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <queries><intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent></queries>
+    <queries><package android:name="com.samsung.android.service.aircommand" /><intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent></queries>
     <application android:label="S Pen Mouse" android:theme="@style/AppTheme" android:icon="@drawable/ic_pen" android:allowBackup="false" android:extractNativeLibs="true" android:supportsRtl="true">
         <meta-data android:name="moe.shizuku.client.V3_SUPPORT" android:value="true" />
         <provider android:name="rikka.shizuku.ShizukuProvider" android:authorities="${applicationId}.shizuku" android:exported="true" android:multiprocess="false" android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
@@ -12,6 +12,7 @@
         <activity android:name=".TestActivity" android:exported="false" />
         <activity android:name=".DpadSettingsActivity" android:exported="false" />
         <activity android:name=".AppSettingsActivity" android:exported="false" />
+        <activity android:name=".MouseButtonSettingsActivity" android:exported="false" />
         <service android:name=".MouseService" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-enabled S Pen to mouse remapping in explicitly selected foreground apps" />
         </service>

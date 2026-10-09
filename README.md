@@ -6,6 +6,8 @@ Use a Samsung S Pen as a mouse in selected Android apps through Shizuku, without
 
 ## Controls
 
+The default mapping is below. Each app can override it under **Settings → Mouse buttons**.
+
 | S Pen action | Mouse input |
 | --- | --- |
 | Hover above the screen | Move the pointer beneath the pen tip |
@@ -32,6 +34,26 @@ Selected apps appear first in the list. Tap an app's icon to launch it with **on
 One-time emulation ends when you leave the app with Home/Back, open Recents, or switch to another app. Returning to it afterward uses the normal global settings. Temporary system panels, permission dialogs, locking the phone, and storing the pen pause controls without ending the session. The notification's Stop button also ends the session. A launch that never reaches the app expires automatically.
 
 For local 0.2.5, the user confirmed the feature works. Phone logs show icon launches capturing the built-in test and Acode, ending the override on departure, and releasing input. The build, APK signature, and session-lifecycle checks passed. Normal shutdown ignores late Shizuku disconnect callbacks so it does not leave a false connection error on the main screen.
+
+## Per-app mouse buttons
+
+Open **Settings** beside an app, then **Mouse buttons**:
+
+| Mode | Touch | Pen button |
+| --- | --- | --- |
+| Default | Hold LMB | Hold RMB |
+| Inverted | Hold RMB | Hold LMB |
+| Swap touch action | Hold the current LMB/RMB action | With the tip lifted, toggle the touch action; during contact, hold the opposite mouse button |
+
+Swap starts with touch as LMB. A hover press switches it to RMB, and the next hover press switches it back. The pen button produces no mouse click for a hover swap. If the tip is already touching, pressing the button adds the opposite button without changing the touch mapping. Each physical press keeps its role until released: touching after a hover swap uses the new touch action, while lifting during a contact chord keeps its barrel-held mouse button pressed. Simultaneous tip and button contact holds both mouse buttons.
+
+On compatible Samsung firmware, Swap also receives the pen's Bluetooth button presses outside hover range. Air actions must remain enabled and the S Pen must be connected and charged. This listener is registered only while Swap is active in the selected foreground app, and is removed when controls pause or emulation stops. It subscribes only to button events; it does not enable the motion sensor or take over the Bluetooth connection. Digitizer and Bluetooth events share one held press so entering or leaving hover does not toggle twice. Default and Inverted continue to use the digitizer.
+
+Samsung's documented [S Pen Remote SDK](https://developer.samsung.com/galaxy-spen-remote/faq.html) is limited to foreground activities. This app instead uses the button callback exposed by the installed Samsung Air Command service, without bundling the SDK. That callback is firmware dependent; if unavailable, Swap still works in hover.
+
+A swap displays **LMB → RMB** or **RMB → LMB**, with the old action muted and the new action bold and highlighted. The popup stays visible throughout the swap-button hold and for the app's configured duration after release, including very short presses. The default is 1.5 seconds, adjustable from 300 ms to 5 seconds. The status window does not accept touch or take focus, and is placed away from the D-pad.
+
+Each app saves its own mode and popup duration. The temporary LMB/RMB swap state is remembered separately for each app during emulation, including when leaving hover or pausing for a system panel. Stopping emulation or changing that app's mode resets it to LMB. One-time icon launches use these settings too. The built-in mouse test exercises LMB, RMB, and dragging using the selected mapping, then restores the original swap state.
 
 ## Arrow D-pad and finger input
 
@@ -79,6 +101,8 @@ Version 0.1.6 was tested on the connected S24 Ultra: hover, left and right click
 
 For version 0.2.0, the user confirmed camera movement and blocking of other finger taps in Company of Heroes on the same phone. Follow-up testing confirmed system popup taps work, Back works, and Home/Recents work after the pen leaves hover range; Home/Recents remain blocked during hover. The user also confirmed both built-in diagnostics passed and a five-second pen-button hold opened neither Samsung's menu nor the assistant. The Android/native builds, APK signature, eight-direction geometry, dead zone, and reserved-edge checks passed. Android recognized the relay as an orientation-aware touchscreen and the camera device as a keyboard. Other games and Samsung firmware versions still need separate testing.
 
+Version 0.2.6 was tested on the connected S24 Ultra running Android 16. The user confirmed the button modes and hover swap, then verified outside-hover Bluetooth presses in the built-in test and in Company of Heroes. Short presses, a three-second hold, timed feedback, and bringing a held button into hover worked without an extra toggle or Samsung menu/assistant. Device logs confirmed Bluetooth swaps targeted the game's package while S Pen Mouse ran in the background. The button mapping, popup timing, source handoff, preference isolation checks, Android build, and APK signature passed. Bluetooth callbacks on other Samsung firmware versions have not been tested.
+
 ## Building on Windows ARM64
 
 You need JDK 17, Android SDK 36, and NDK r26d with a compiler that runs on Windows ARM64. Both build scripts read the NDK directory from the `ANDROID_NDK` environment variable. The SDK defaults to `%LOCALAPPDATA%\Android\Sdk`.
@@ -110,6 +134,8 @@ You can also open the project in Android Studio. Prebuilt ARM64 native binaries 
 - `PadSettingsOverlay` / `CenterHold`: in-game quick settings and physical-finger center dwell detection.
 - `PenUserService`: foreground app detection and injection of `SOURCE_MOUSE` / `TOOL_TYPE_MOUSE` events restricted to the selected app's UID.
 - `LaunchSession`: temporary emulation for one foreground visit, with system-panel pauses and automatic expiry.
+- `MouseButtons` / `MouseButtonSettingsActivity` / `SwapPopup`: per-app button mapping, contact chords, and timed swap feedback.
+- `SamsungPenRemote` / `PenButtonSources`: optional Samsung Bluetooth button callbacks and reconciliation with digitizer presses.
 - `CameraInput` / `CameraConfig`: finger routing, per-app eight-direction geometry, keyboard holds and repeats, and system gesture handoff.
 - `TouchWindows`: read-only window geometry used to pass finger touches to system popups.
 - `input.c`: discovery of the physical `sec_e-pen`, exclusive evdev capture, a mouse identity, and a switch-only relay using Samsung's pen configuration.
@@ -135,6 +161,20 @@ The one-time launch check covers target isolation, Home/Back/Recents and app-swi
 ```powershell
 javac -d "$env:TEMP\spen-launch-check" app/src/main/java/dev/spenmouse/LaunchSession.java checks/LaunchSessionCheck.java
 java -cp "$env:TEMP\spen-launch-check" dev.spenmouse.LaunchSessionCheck
+```
+
+The button check covers default/inverted mapping, hover toggles, contact chords, press-role latching, popup timing and limits, pauses, mode changes, and separate app states:
+
+```powershell
+javac -d "$env:TEMP\spen-buttons-check" app/src/main/java/dev/spenmouse/MouseButtons.java checks/MouseButtonsCheck.java
+java -cp "$env:TEMP\spen-buttons-check" dev.spenmouse.MouseButtonsCheck
+```
+
+The source handoff check covers Bluetooth press/release, rapid presses, duplicate events, entering/leaving hover while held, contact chords, and session cleanup:
+
+```powershell
+javac -d "$env:TEMP/spen-buttons-check" app/src/main/java/dev/spenmouse/MouseButtons.java app/src/main/java/dev/spenmouse/PenButtonSources.java checks/PenButtonSourcesCheck.java
+java -cp "$env:TEMP/spen-buttons-check" dev.spenmouse.PenButtonSourcesCheck
 ```
 
 After building the APK, the preferences check verifies legacy migration, preservation of existing values, isolation between apps, defaults for new apps, and repeat migration:

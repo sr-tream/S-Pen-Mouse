@@ -27,6 +27,8 @@ public final class MouseService extends Service {
     private boolean padAdded;
     private WindowManager.LayoutParams padParams;
     private PadSettingsOverlay padSettings;
+    private SwapPopup swapPopup;
+    private SamsungPenRemote penRemote;
     private boolean hoverBridgeAdded;
     private volatile long lastBridgeEvent;
     private WindowManager.LayoutParams params;
@@ -69,6 +71,11 @@ public final class MouseService extends Service {
         getSystemService(NotificationManager.class).createNotificationChannel(channel);
         startForeground(1, notification("Подключение к Shizuku"));
         wm = getSystemService(WindowManager.class);
+        swapPopup=new SwapPopup(this,wm);
+        penRemote=new SamsungPenRemote(this,new SamsungPenRemote.Host(){
+            public void button(boolean down){if(engine!=null)try{engine.remoteButton(state.getString("foreground",""),down);}catch(RemoteException e){Log.w(TAG,"Bluetooth button",e);}}
+            public void disconnected(){button(false);}
+        });
         cursor = new CursorView(this);
         if(Settings.canDrawOverlays(this)) {
             hoverBridge=new View(this) {
@@ -153,6 +160,7 @@ public final class MouseService extends Service {
             Set<String> profiles=Prefs.apps(this);
             if(!launchPackage.isEmpty())profiles.add(launchPackage);
             engine.configureCamera(Prefs.dpadProfiles(this,profiles));
+            engine.configureButtons(Prefs.buttonProfiles(this,profiles));
             engine.configure(packages.toArray(new String[0]), ids, Prefs.get(this).getBoolean("enabled", false), hoverBridgeAdded);
             if(pendingLaunch) {
                 int uid=getPackageManager().getApplicationInfo(launchPackage,0).uid;
@@ -215,8 +223,10 @@ public final class MouseService extends Service {
                     }
                 }
                 updatePad();
+                penRemote.update(engine!=null && state.getBoolean("active") && state.getInt("buttonMode")==MouseButtons.SWAP && !state.getBoolean("penInserted") && !state.getBoolean("cameraEditing") && !state.getBoolean("systemTouchPaused"));
                 padSettings.update(state);
-                params.alpha=padAdded?.3f:.7f;
+                swapPopup.update(state,padAdded);
+                params.alpha=padAdded || swapPopup.visible()?.3f:.7f;
                 if (Prefs.cursor(MouseService.this,state.getString("foreground","")) && Settings.canDrawOverlays(MouseService.this)
                         && state.getBoolean("active") && state.getBoolean("inRange")) {
                     params.x = Math.round(state.getFloat("x")) - dp(3);
@@ -232,7 +242,7 @@ public final class MouseService extends Service {
                     if (!state.getString("error", "").isEmpty()) text = "Ошибка: откройте S Pen Mouse";
                     getSystemService(NotificationManager.class).notify(1, notification(text));
                 }
-            } catch (Throwable e) { Log.w(TAG, "Status", e); hideCursor();hidePad();padSettings.hide(); }
+            } catch (Throwable e) { Log.w(TAG, "Status", e); penRemote.update(false);hideCursor();hidePad();padSettings.hide();swapPopup.hide(); }
             handler.postDelayed(this, state.getBoolean("active") && state.getBoolean("inRange") ? 16 : 100);
         }
     };
@@ -257,7 +267,8 @@ public final class MouseService extends Service {
     private void hidePad() {if(padAdded){try{wm.removeView(cameraPad);}catch(Throwable ignored){}padAdded=false;}}
     @Override public void onDestroy() {
         destroyed=true;
-        handler.removeCallbacksAndMessages(null); hideCursor();hidePad();padSettings.hide();
+        penRemote.destroy();
+        handler.removeCallbacksAndMessages(null); hideCursor();hidePad();padSettings.hide();swapPopup.hide();
         try { if (engine != null) engine.stop(); } catch (Throwable ignored) { }
         try { if (Shizuku.pingBinder()) Shizuku.unbindUserService(args, connection, true); } catch (Throwable ignored) { }
         Shizuku.removeBinderReceivedListener(received); Shizuku.removeBinderDeadListener(dead);

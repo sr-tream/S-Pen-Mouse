@@ -16,6 +16,16 @@ final class Prefs {
         e.putBoolean("cursor_per_app",true).remove("cursor").apply();
     }
     static boolean cursor(Context c,String pkg) {return get(c).getBoolean("cursor:"+pkg,true);}
+    static String buttonKey(String pkg,String setting){return "buttons:"+pkg+":"+setting;}
+    static int buttonMode(Context c,String pkg){return MouseButtons.validMode(get(c).getInt(buttonKey(pkg,"mode"),MouseButtons.DEFAULT));}
+    static int buttonPopupMs(Context c,String pkg){return MouseButtons.validPopupMs(get(c).getInt(buttonKey(pkg,"popup_ms"),1500));}
+    static Bundle buttonProfiles(Context c,Set<String> packages) {
+        Bundle profiles=new Bundle();
+        for(String pkg:packages) {
+            Bundle b=new Bundle();b.putInt("mode",buttonMode(c,pkg));b.putInt("popupMs",buttonPopupMs(c,pkg));profiles.putBundle(pkg,b);
+        }
+        return profiles;
+    }
     static String dpadKey(String pkg,String setting) {return "dpad:"+pkg+":"+setting;}
     static void migrateDpad(Context c) {migrateDpad(get(c),apps(c));}
     static void migrateDpad(SharedPreferences p,Set<String> apps) {

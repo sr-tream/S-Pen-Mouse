@@ -61,7 +61,7 @@ public final class MainActivity extends Activity {
         access = text("",12,0xff9dafb9); root.addView(access);
         permission.setOnClickListener(v -> requestShizuku());
         overlay.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName()))));
-        root.addView(text("Cursor, arrow D-pad and finger touch: Settings beside each app.",12,0xff9dafb9));
+        root.addView(text("Cursor, mouse buttons, arrow D-pad and finger touch: Settings beside each app.",12,0xff9dafb9));
         Button test = button("Проверить мышь и перетаскивание"); root.addView(test,full());
         test.setOnClickListener(v -> startActivity(new Intent(this,TestActivity.class)));
         TextView appTitle = text("ПРИЛОЖЕНИЯ",12,0xff5ce1c3); appTitle.setPadding(0,dp(12),0,dp(4)); root.addView(appTitle);

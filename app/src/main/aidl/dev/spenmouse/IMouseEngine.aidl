@@ -13,5 +13,7 @@ interface IMouseEngine {
     void setCameraUi(in Bundle bounds, ICameraUi callback) = 8;
     void beginLaunch(String packageName, int uid) = 9;
     void cancelLaunch() = 10;
+    void configureButtons(in Bundle profiles) = 11;
+    void remoteButton(String packageName, boolean down) = 12;
     void destroy() = 16777114;
 }
