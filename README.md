@@ -25,6 +25,8 @@ Requirements: Android 13 or later, ARM64, a running Shizuku service, and permiss
 4. Open the built-in test to inspect input events, mouse buttons, and dragging.
 5. Stop emulation with the main switch or the Stop action in the notification.
 
+The Shizuku and overlay access buttons hide when their access is granted. If either permission is revoked, its request button reappears when you return to the main screen or during its regular access checks. When both permissions are granted, the entire button row is hidden. Revoking and restoring each permission was verified on the tested S24 Ultra with local 0.2.4.
+
 ## Arrow D-pad and finger input
 
 The optional eight-direction D-pad sends held keyboard arrow keys to the selected app. It can move a game camera when that game uses arrows for camera movement, or perform any other action the app assigns to arrow keys. Open **Settings** beside an app, then **Arrow D-pad and finger touch** to enable it and adjust opacity, horizontal position, vertical position, and size.

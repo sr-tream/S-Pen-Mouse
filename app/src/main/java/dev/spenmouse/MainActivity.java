@@ -14,6 +14,7 @@ import android.text.*;
 import android.view.*;
 import android.widget.*;
 import java.util.*;
+import moe.shizuku.server.IShizukuService;
 import rikka.shizuku.Shizuku;
 
 public final class MainActivity extends Activity {
@@ -21,7 +22,7 @@ public final class MainActivity extends Activity {
     private Switch master;
     private TextView status, details, access;
     private Button permission, overlay;
-    private LinearLayout appList;
+    private LinearLayout appList, permissionRow;
     private EditText search;
     private boolean changing, pendingStart;
     private final ArrayList<App> apps = new ArrayList<>();
@@ -47,7 +48,7 @@ public final class MainActivity extends Activity {
         card.addView(text("Hover — движение  ·  Касание — ЛКМ\nКнопка пера — ПКМ  ·  Отрыв — отпустить ЛКМ",13,0xffcad5db));
         card.addView(text("Жесты Samsung временно отключаются в режиме мыши.",11,0xff9dafb9));
         master.setOnCheckedChangeListener((b,on) -> { if(changing)return; if(on)enable(); else disable(); });
-        LinearLayout permissionRow = new LinearLayout(this);
+        permissionRow = new LinearLayout(this);
         permission = button("Доступ Shizuku"); overlay = button("Разрешить показ поверх приложений");
         permissionRow.addView(permission,new LinearLayout.LayoutParams(0,dp(48),1));
         permissionRow.addView(overlay,new LinearLayout.LayoutParams(0,dp(48),1)); root.addView(permissionRow);
@@ -72,12 +73,12 @@ public final class MainActivity extends Activity {
             if(!Shizuku.pingBinder()) {
                 Intent i=getPackageManager().getLaunchIntentForPackage("moe.shizuku.privileged.api");
                 if(i!=null)startActivity(i); else Toast.makeText(this,"Установите и запустите Shizuku",Toast.LENGTH_LONG).show();
-            } else if(!MouseService.ready()) Shizuku.requestPermission(7);
+            } else if(!hasShizukuAccess()) Shizuku.requestPermission(7);
             else Toast.makeText(this,"Доступ уже разрешён",Toast.LENGTH_SHORT).show();
         } catch(Throwable e){ Toast.makeText(this,e.toString(),Toast.LENGTH_LONG).show(); }
     }
     private void enable() {
-        if(!MouseService.ready()){ pendingStart=true; changing=true; master.setChecked(false); changing=false; requestShizuku();return; }
+        if(!hasShizukuAccess()){ pendingStart=true; changing=true; master.setChecked(false); changing=false; requestShizuku();return; }
         if(!Settings.canDrawOverlays(this)){
             changing=true;master.setChecked(false);changing=false;
             Toast.makeText(this,"Разрешите показ поверх приложений: он нужен для подавления жестов Samsung",Toast.LENGTH_LONG).show();
@@ -131,17 +132,27 @@ public final class MainActivity extends Activity {
         Bundle b=MouseService.state;
         String err=b.getString("error","");
         status.setText(!err.isEmpty()?"Ошибка подключения": !on?"Выключено": b.getBoolean("penInserted")?"S Pen stored: controls paused": b.getBoolean("waitingForPenExit")?"Move pen out of hover to resume controls": b.getBoolean("active")?"Мышь активна":"Ожидание выбранного приложения");
-        boolean ready=MouseService.ready(), arrow=Settings.canDrawOverlays(this);
+        boolean ready=hasShizukuAccess(), arrow=Settings.canDrawOverlays(this);
         access.setText((ready?"Shizuku: доступ разрешён":"Shizuku: нужен запуск и разрешение")+"\n"+(arrow?"Показ поверх приложений: разрешён":"Показ поверх приложений: требуется для подавления жестов"));
-        overlay.setText(arrow?"Настройки показа поверх приложений":"Разрешить показ поверх приложений");
+        permission.setVisibility(ready?View.GONE:View.VISIBLE);
+        overlay.setVisibility(arrow?View.GONE:View.VISIBLE);
+        permissionRow.setVisibility(ready && arrow?View.GONE:View.VISIBLE);
         String info=!err.isEmpty()?err: b.getBoolean("running")?"Экран: "+b.getString("foreground","")+"  ·  Событий: "+b.getLong("sent"):
             "Перо должно быть близко к экрану. Для остановки используйте уведомление.";
         String cameraError=b.getString("cameraError","");
         details.setText(!cameraError.isEmpty()?cameraError:b.getString("warning", "").isEmpty()?info:b.getString("warning"));
     }
+    private boolean hasShizukuAccess() {
+        try {
+            if(!Shizuku.pingBinder())return false;
+            // Shizuku.checkSelfPermission() caches successful grants. Ask the
+            // service directly so a revoked grant cannot hide the request button.
+            return IShizukuService.Stub.asInterface(Shizuku.getBinder()).checkSelfPermission();
+        } catch(Throwable e){return false;}
+    }
     private final Runnable refreshLoop=new Runnable(){public void run(){refresh();handler.postDelayed(this,700);}};
     @Override protected void onResume(){super.onResume();
-        if(Prefs.get(this).getBoolean("enabled",false) && MouseService.ready() && !MouseService.alive)
+        if(Prefs.get(this).getBoolean("enabled",false) && hasShizukuAccess() && !MouseService.alive)
             startForegroundService(new Intent(this,MouseService.class));
         handler.post(refreshLoop);
     }
