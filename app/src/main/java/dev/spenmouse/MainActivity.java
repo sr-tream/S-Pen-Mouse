@@ -25,11 +25,17 @@ public final class MainActivity extends Activity {
     private LinearLayout appList, permissionRow;
     private EditText search;
     private boolean changing, pendingStart;
+    private String pendingLaunch;
+    private boolean awaitingOverlay;
     private final ArrayList<App> apps = new ArrayList<>();
     private final Shizuku.OnBinderReceivedListener received = () -> runOnUiThread(this::refresh);
     private final Shizuku.OnBinderDeadListener dead = () -> runOnUiThread(this::refresh);
     private final Shizuku.OnRequestPermissionResultListener granted = (code, result) -> runOnUiThread(() -> {
-        refresh(); if (result == PackageManager.PERMISSION_GRANTED && pendingStart) enable(); pendingStart=false;
+        refresh();
+        if(result==PackageManager.PERMISSION_GRANTED) {
+            if(pendingLaunch!=null)continueLaunch();else if(pendingStart)enable();
+        } else pendingLaunch=null;
+        pendingStart=false;
     });
     private record App(String pkg, String label, android.graphics.drawable.Drawable icon) { }
 
@@ -59,6 +65,7 @@ public final class MainActivity extends Activity {
         Button test = button("Проверить мышь и перетаскивание"); root.addView(test,full());
         test.setOnClickListener(v -> startActivity(new Intent(this,TestActivity.class)));
         TextView appTitle = text("ПРИЛОЖЕНИЯ",12,0xff5ce1c3); appTitle.setPadding(0,dp(12),0,dp(4)); root.addView(appTitle);
+        root.addView(text("Tap an app icon to launch with emulation for this visit.",12,0xff9dafb9));
         search = new EditText(this); search.setSingleLine(); search.setTextSize(14); search.setTextColor(Color.WHITE);
         search.setHintTextColor(0xff9dafb9); search.setHint("Поиск по названию или пакету"); root.addView(search,full());
         ScrollView scroll = new ScrollView(this); appList = new LinearLayout(this); appList.setOrientation(LinearLayout.VERTICAL);
@@ -78,6 +85,7 @@ public final class MainActivity extends Activity {
         } catch(Throwable e){ Toast.makeText(this,e.toString(),Toast.LENGTH_LONG).show(); }
     }
     private void enable() {
+        pendingLaunch=null;awaitingOverlay=false;
         if(!hasShizukuAccess()){ pendingStart=true; changing=true; master.setChecked(false); changing=false; requestShizuku();return; }
         if(!Settings.canDrawOverlays(this)){
             changing=true;master.setChecked(false);changing=false;
@@ -90,7 +98,23 @@ public final class MainActivity extends Activity {
         startForegroundService(new Intent(this,MouseService.class)); refresh();
     }
     private void disable() {
-        pendingStart=false; Prefs.get(this).edit().putBoolean("enabled",false).apply(); stopService(new Intent(this,MouseService.class)); refresh();
+        pendingStart=false;pendingLaunch=null;awaitingOverlay=false; Prefs.get(this).edit().putBoolean("enabled",false).apply(); stopService(new Intent(this,MouseService.class)); refresh();
+    }
+    private void launchApp(String pkg) {
+        if(MouseService.launchIntent(this,pkg)==null){Toast.makeText(this,"This app cannot be launched",Toast.LENGTH_LONG).show();return;}
+        pendingStart=false;pendingLaunch=pkg;continueLaunch();
+    }
+    private void continueLaunch() {
+        if(pendingLaunch==null)return;
+        if(!hasShizukuAccess()){requestShizuku();return;}
+        if(!Settings.canDrawOverlays(this)) {
+            awaitingOverlay=true;
+            startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName())));return;
+        }
+        String pkg=pendingLaunch;pendingLaunch=null;awaitingOverlay=false;
+        if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},8);
+        startForegroundService(new Intent(this,MouseService.class).setAction(MouseService.ACTION_LAUNCH).putExtra("package",pkg));
     }
     private void loadApps() {
         PackageManager pm=getPackageManager(); TreeMap<String,App> map=new TreeMap<>();
@@ -107,10 +131,15 @@ public final class MainActivity extends Activity {
     private void renderApps() {
         appList.removeAllViews(); Set<String> chosen=Prefs.apps(this);
         String q=search.getText().toString().trim().toLowerCase(Locale.ROOT);
-        for(App app:apps) {
+        ArrayList<App> ordered=new ArrayList<>(apps);
+        ordered.sort(Comparator.comparing((App app)->!chosen.contains(app.pkg)));
+        for(App app:ordered) {
             if(!q.isEmpty() && !(app.label+" "+app.pkg).toLowerCase(Locale.ROOT).contains(q))continue;
             LinearLayout row=new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL); row.setPadding(0,dp(4),0,dp(4));
-            ImageView icon=new ImageView(this);icon.setImageDrawable(app.icon);row.addView(icon,new LinearLayout.LayoutParams(dp(34),dp(34)));
+            ImageButton icon=new ImageButton(this);icon.setImageDrawable(app.icon);icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);icon.setPadding(dp(8),dp(8),dp(8),dp(8));
+            GradientDrawable launchBackground=new GradientDrawable();launchBackground.setColor(0xff1a3944);launchBackground.setCornerRadius(dp(8));launchBackground.setStroke(dp(1),0xff5ce1c3);icon.setBackground(launchBackground);
+            icon.setContentDescription("Launch "+app.label+" with one-time emulation");icon.setTooltipText("Launch once with mouse emulation");
+            icon.setOnClickListener(v->launchApp(app.pkg));row.addView(icon,new LinearLayout.LayoutParams(dp(52),dp(48)));
             LinearLayout label=new LinearLayout(this);label.setOrientation(LinearLayout.VERTICAL);label.setPadding(dp(12),0,0,0);
             label.addView(text(app.label,15,Color.WHITE));label.addView(text(app.pkg,10,0xff9dafb9));
             row.addView(label,new LinearLayout.LayoutParams(0,-2,1));
@@ -121,6 +150,7 @@ public final class MainActivity extends Activity {
                 Set<String> set=Prefs.apps(this);if(on)set.add(app.pkg);else set.remove(app.pkg);
                 Prefs.get(this).edit().putStringSet("apps",set).apply();
                 if(MouseService.alive)startService(new Intent(this,MouseService.class));
+                handler.post(this::renderApps);
             });
             row.setOnClickListener(v -> check.setChecked(!check.isChecked())); appList.addView(row,full());
         }
@@ -131,7 +161,9 @@ public final class MainActivity extends Activity {
         changing=true;master.setChecked(on);changing=false;
         Bundle b=MouseService.state;
         String err=b.getString("error","");
-        status.setText(!err.isEmpty()?"Ошибка подключения": !on?"Выключено": b.getBoolean("penInserted")?"S Pen stored: controls paused": b.getBoolean("waitingForPenExit")?"Move pen out of hover to resume controls": b.getBoolean("active")?"Мышь активна":"Ожидание выбранного приложения");
+        boolean oneTime=!b.getString("launchPackage","").isEmpty();
+        String message=!err.isEmpty()?"Ошибка подключения": !on && !oneTime?"Выключено": b.getBoolean("penInserted")?"S Pen stored: controls paused": b.getBoolean("waitingForPenExit")?"Move pen out of hover to resume controls": b.getBoolean("active")?"Мышь активна":"Ожидание выбранного приложения";
+        status.setText(oneTime?"One-time: "+message:message);
         boolean ready=hasShizukuAccess(), arrow=Settings.canDrawOverlays(this);
         access.setText((ready?"Shizuku: доступ разрешён":"Shizuku: нужен запуск и разрешение")+"\n"+(arrow?"Показ поверх приложений: разрешён":"Показ поверх приложений: требуется для подавления жестов"));
         permission.setVisibility(ready?View.GONE:View.VISIBLE);
@@ -152,6 +184,8 @@ public final class MainActivity extends Activity {
     }
     private final Runnable refreshLoop=new Runnable(){public void run(){refresh();handler.postDelayed(this,700);}};
     @Override protected void onResume(){super.onResume();
+        if(pendingLaunch!=null && hasShizukuAccess() && Settings.canDrawOverlays(this))continueLaunch();
+        else if(awaitingOverlay){pendingLaunch=null;awaitingOverlay=false;}
         if(Prefs.get(this).getBoolean("enabled",false) && hasShizukuAccess() && !MouseService.alive)
             startForegroundService(new Intent(this,MouseService.class));
         handler.post(refreshLoop);

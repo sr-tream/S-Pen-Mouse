@@ -9,6 +9,7 @@ import android.provider.Settings;
 import android.util.Log;
 import android.view.*;
 import java.util.ArrayList;
+import java.util.Set;
 import rikka.shizuku.Shizuku;
 
 public final class MouseService extends Service {
@@ -19,6 +20,7 @@ public final class MouseService extends Service {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private IMouseEngine engine;
     private boolean binding, cursorAdded;
+    private volatile boolean destroyed;
     private WindowManager wm;
     private View cursor, hoverBridge;
     private CameraPadView cameraPad;
@@ -29,15 +31,22 @@ public final class MouseService extends Service {
     private volatile long lastBridgeEvent;
     private WindowManager.LayoutParams params;
     private long lastNotification;
+    static final String ACTION_LAUNCH="launch_once";
+    private String launchPackage="";
+    private Intent launchIntent;
+    private boolean pendingLaunch;
+    private long launchDeadline;
     private final Shizuku.UserServiceArgs args = new Shizuku.UserServiceArgs(
         new ComponentName("dev.spenmouse", PenUserService.class.getName()))
         .daemon(false).processNameSuffix("pen_engine").tag("spen-mouse-engine").version(BuildConfig.VERSION_CODE);
     private final ServiceConnection connection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
+            if(destroyed)return;
             engine = IMouseEngine.Stub.asInterface(binder); binding = false;
             applyConfig();
         }
         @Override public void onServiceDisconnected(ComponentName name) {
+            if(destroyed)return;
             engine = null; binding = false; hideCursor();
             Bundle b = new Bundle(); b.putString("error", "Сервис Shizuku отключился"); state = b;
         }
@@ -109,12 +118,22 @@ public final class MouseService extends Service {
         if (intent != null && "stop".equals(intent.getAction())) {
             Prefs.get(this).edit().putBoolean("enabled", false).apply(); stopSelf(); return START_NOT_STICKY;
         }
-        if (!Prefs.get(this).getBoolean("enabled", false)) { stopSelf(); return START_NOT_STICKY; }
+        if(intent!=null && ACTION_LAUNCH.equals(intent.getAction())) {
+            String pkg=intent.getStringExtra("package");
+            Intent target=launchIntent(this,pkg);
+            if(target==null) {
+                android.widget.Toast.makeText(this,"This app cannot be launched",android.widget.Toast.LENGTH_LONG).show();
+                if(!Prefs.get(this).getBoolean("enabled",false) && launchPackage.isEmpty())stopSelf();
+                return START_NOT_STICKY;
+            }
+            launchPackage=pkg;launchIntent=target;pendingLaunch=true;launchDeadline=SystemClock.uptimeMillis()+30000;
+        }
+        if (!Prefs.get(this).getBoolean("enabled", false) && launchPackage.isEmpty()) { stopSelf(); return START_NOT_STICKY; }
         if (engine != null) applyConfig(); else bind();
         return START_NOT_STICKY;
     }
     private void bind() {
-        if (!ready() || binding || engine != null) return;
+        if (destroyed || !ready() || binding || engine != null) return;
         binding = true;
         try { Shizuku.bindUserService(args, connection); }
         catch (Throwable e) {
@@ -131,10 +150,32 @@ public final class MouseService extends Service {
         }
         int[] ids = new int[uids.size()]; for (int n=0; n<ids.length; n++) ids[n] = uids.get(n);
         try {
-            engine.configureCamera(Prefs.dpadProfiles(this));
+            Set<String> profiles=Prefs.apps(this);
+            if(!launchPackage.isEmpty())profiles.add(launchPackage);
+            engine.configureCamera(Prefs.dpadProfiles(this,profiles));
             engine.configure(packages.toArray(new String[0]), ids, Prefs.get(this).getBoolean("enabled", false), hoverBridgeAdded);
+            if(pendingLaunch) {
+                int uid=getPackageManager().getApplicationInfo(launchPackage,0).uid;
+                engine.beginLaunch(launchPackage,uid);
+                pendingLaunch=false;
+                startActivity(launchIntent);
+                launchIntent=null;
+            }
         }
-        catch (RemoteException e) { Log.e(TAG, "Configure", e); }
+        catch (Throwable e) {
+            Log.e(TAG, "Configure", e);
+            if(pendingLaunch || launchIntent!=null) {
+                pendingLaunch=false;launchIntent=null;launchPackage="";
+                try{engine.cancelLaunch();}catch(Throwable ignored){}
+                android.widget.Toast.makeText(this,"Cannot start one-time emulation: "+e.getMessage(),android.widget.Toast.LENGTH_LONG).show();
+                if(!Prefs.get(this).getBoolean("enabled",false))stopSelf();
+            }
+        }
+    }
+    static Intent launchIntent(Context context,String pkg) {
+        if(pkg==null || pkg.isEmpty())return null;
+        Intent intent=pkg.equals(context.getPackageName())?new Intent(context,TestActivity.class):context.getPackageManager().getLaunchIntentForPackage(pkg);
+        return intent==null?null:intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
     }
     static void runSelfTest(Context context) {
         MouseService service=instance;
@@ -160,7 +201,19 @@ public final class MouseService extends Service {
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             try {
-                if (engine != null) {engine.updateBridgeHeartbeat(lastBridgeEvent);state = engine.getState();}
+                if(pendingLaunch && SystemClock.uptimeMillis()>=launchDeadline) {
+                    pendingLaunch=false;launchPackage="";launchIntent=null;
+                    android.widget.Toast.makeText(MouseService.this,"One-time launch timed out while connecting to Shizuku",android.widget.Toast.LENGTH_LONG).show();
+                    if(!Prefs.get(MouseService.this).getBoolean("enabled",false)){stopSelf();return;}
+                }
+                if (engine != null) {
+                    engine.updateBridgeHeartbeat(lastBridgeEvent);state = engine.getState();
+                    if(!pendingLaunch && !launchPackage.isEmpty() && state.getString("launchPackage","").isEmpty()) {
+                        launchPackage="";launchIntent=null;
+                        if(!Prefs.get(MouseService.this).getBoolean("enabled",false)){stopSelf();return;}
+                        applyConfig();
+                    }
+                }
                 updatePad();
                 padSettings.update(state);
                 params.alpha=padAdded?.3f:.7f;
@@ -175,6 +228,7 @@ public final class MouseService extends Service {
                 if (now - lastNotification > 2000) {
                     lastNotification = now;
                     String text = state.getBoolean("penInserted") ? "S Pen stored: controls paused" : state.getBoolean("waitingForPenExit") ? "Move pen out of hover to resume controls" : state.getBoolean("active") ? "Мышь: " + state.getString("foreground", "") : "Ожидание выбранного приложения";
+                    if(!launchPackage.isEmpty())text="One-time: "+launchPackage+" · "+text;
                     if (!state.getString("error", "").isEmpty()) text = "Ошибка: откройте S Pen Mouse";
                     getSystemService(NotificationManager.class).notify(1, notification(text));
                 }
@@ -202,6 +256,7 @@ public final class MouseService extends Service {
     }
     private void hidePad() {if(padAdded){try{wm.removeView(cameraPad);}catch(Throwable ignored){}padAdded=false;}}
     @Override public void onDestroy() {
+        destroyed=true;
         handler.removeCallbacksAndMessages(null); hideCursor();hidePad();padSettings.hide();
         try { if (engine != null) engine.stop(); } catch (Throwable ignored) { }
         try { if (Shizuku.pingBinder()) Shizuku.unbindUserService(args, connection, true); } catch (Throwable ignored) { }

@@ -11,5 +11,7 @@ interface IMouseEngine {
     Bundle cameraSelfTest() = 6;
     void setCameraEditing(boolean editing) = 7;
     void setCameraUi(in Bundle bounds, ICameraUi callback) = 8;
+    void beginLaunch(String packageName, int uid) = 9;
+    void cancelLaunch() = 10;
     void destroy() = 16777114;
 }

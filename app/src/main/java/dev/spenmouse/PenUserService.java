@@ -23,6 +23,8 @@ public final class PenUserService extends IMouseEngine.Stub {
     private final Object eventLock = new Object();
     private volatile Map<String, Integer> selected = new HashMap<>();
     private volatile boolean enabled, quit, running, active, inRange;
+    private volatile boolean globalEnabled, hoverBridgeReady;
+    private final LaunchSession launch=new LaunchSession();
     private volatile boolean penInserted;
     private volatile boolean waitingForPenExit;
     private volatile boolean gesturesSuppressed;
@@ -119,16 +121,29 @@ public final class PenUserService extends IMouseEngine.Stub {
             }
         }
         selected = map;
+        this.hoverBridgeReady=hoverBridgeReady;
         if(value && !hoverBridgeReady){error="Разрешите показ поверх приложений для подавления жестов Samsung";value=false;}
-        enabled = value;
-        if (value && !quit && (worker == null || !worker.isAlive()) && input != null) {
+        globalEnabled=value;
+        enabled=value || launch.active() && hoverBridgeReady;
+        startWorker();
+    }
+    private void startWorker() {
+        if (enabled && !quit && (worker == null || !worker.isAlive()) && input != null) {
             error = "";
             worker = new Thread(this::loop, "S Pen input");
             worker.start();
         }
     }
+    @Override public synchronized void beginLaunch(String pkg,int uid) {
+        if(input==null || quit)throw new IllegalStateException("Mouse engine unavailable: "+error);
+        if(!hoverBridgeReady)throw new IllegalStateException("Allow display over other apps first");
+        launch.begin(pkg,uid,SystemClock.uptimeMillis());enabled=true;
+        Log.i(TAG,"One-time launch requested for "+pkg);
+        startWorker();
+    }
+    @Override public synchronized void cancelLaunch(){launch.clear();enabled=globalEnabled;}
 
-    private String topPackage() throws Exception {
+    private String topPackage(boolean usable,long now) throws Exception {
         Class<?>[] types = getTasks.getParameterTypes();
         Object[] args = new Object[types.length];
         for (int n = 0; n < types.length; n++) {
@@ -145,8 +160,13 @@ public final class PenUserService extends IMouseEngine.Stub {
             try { if (t.getClass().getField("isFocused").getBoolean(t)) { first = t; break; } }
             catch (ReflectiveOperationException ignored) { }
         }
-        if (first == null) return "";
-        ComponentName c = first.topActivity;
+        ComponentName c=first==null?null:first.topActivity;
+        String requested=launch.packageName();
+        if(launch.observe(c==null?"":c.getPackageName(),c==null?"":c.getClassName(),usable,now)) {
+            enabled=globalEnabled || launch.active();
+            Log.i(TAG,"One-time launch ended for "+requested);
+        }
+        if(c==null)return "";
         // Notification shade and other system windows can focus above a still-visible game task.
         if(visibleWindows!=null) {
             for(Object w:(List<?>)visibleWindows.invoke(windows)) {
@@ -208,9 +228,11 @@ public final class PenUserService extends IMouseEngine.Stub {
                     boolean inserted = NativeInput.penInserted(handle);
                     if (penInserted != inserted) Log.i(TAG, inserted ? "S Pen inserted; pausing controls" : "S Pen ejected; restoring app controls");
                     penInserted = inserted;
-                    String top = topPackage();
-                    Integer uid = selected.get(top);
-                    boolean wanted = !penInserted && uid != null && screenUsable() && now >= cooldownUntil;
+                    boolean usable=screenUsable();
+                    String top = topPackage(usable,now);
+                    int launchUid=launch.uidFor(top);
+                    Integer uid=launchUid>=10000?Integer.valueOf(launchUid):globalEnabled?selected.get(top):null;
+                    boolean wanted = !penInserted && uid != null && usable && now >= cooldownUntil;
                     waitingForPenExit = wanted && !grabbed;
                     if (grabbed && (!wanted || uid != targetUid || !foreground.equals(top))) {
                         Log.i(TAG, "Released from " + foreground);
@@ -270,6 +292,7 @@ public final class PenUserService extends IMouseEngine.Stub {
             }
         } catch (Throwable e) {
             error = readable(e); enabled = false;
+            launch.clear();
             Log.e(TAG, "Engine", e);
         } finally {
             camera.close();
@@ -440,6 +463,7 @@ public final class PenUserService extends IMouseEngine.Stub {
         DpadProfile profile=dpadProfile;
         Bundle b = new Bundle();
         b.putBoolean("running", running); b.putBoolean("enabled", enabled);
+        b.putString("launchPackage",launch.packageName());
         b.putBoolean("active", active); b.putBoolean("inRange", inRange);
         b.putBoolean("penInserted", penInserted);
         b.putBoolean("waitingForPenExit", waitingForPenExit);
@@ -502,7 +526,7 @@ public final class PenUserService extends IMouseEngine.Stub {
         onFrame(new int[]{Math.round(u*10000),Math.round(v*10000),range,tip,barrel,0,10000,0,10000,0});
     }
     @Override public synchronized void stop() {
-        enabled = false;
+        globalEnabled=false;launch.clear();enabled = false;
         Thread t = worker;
         if (t != null && t != Thread.currentThread()) {
             try { t.join(1500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }

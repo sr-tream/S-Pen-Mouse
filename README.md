@@ -27,6 +27,12 @@ Requirements: Android 13 or later, ARM64, a running Shizuku service, and permiss
 
 The Shizuku and overlay access buttons hide when their access is granted. If either permission is revoked, its request button reappears when you return to the main screen or during its regular access checks. When both permissions are granted, the entire button row is hidden. Revoking and restoring each permission was verified on the tested S24 Ultra with local 0.2.4.
 
+Selected apps appear first in the list. Tap an app's icon to launch it with **one-time emulation**, including when the global switch is off or the app is unchecked. This uses the app's saved cursor, arrow D-pad, and finger-touch settings without changing its checkbox or the global switch. The built-in test's icon opens the test screen.
+
+One-time emulation ends when you leave the app with Home/Back, open Recents, or switch to another app. Returning to it afterward uses the normal global settings. Temporary system panels, permission dialogs, locking the phone, and storing the pen pause controls without ending the session. The notification's Stop button also ends the session. A launch that never reaches the app expires automatically.
+
+For local 0.2.5, the user confirmed the feature works. Phone logs show icon launches capturing the built-in test and Acode, ending the override on departure, and releasing input. The build, APK signature, and session-lifecycle checks passed. Normal shutdown ignores late Shizuku disconnect callbacks so it does not leave a false connection error on the main screen.
+
 ## Arrow D-pad and finger input
 
 The optional eight-direction D-pad sends held keyboard arrow keys to the selected app. It can move a game camera when that game uses arrows for camera movement, or perform any other action the app assigns to arrow keys. Open **Settings** beside an app, then **Arrow D-pad and finger touch** to enable it and adjust opacity, horizontal position, vertical position, and size.
@@ -103,6 +109,7 @@ You can also open the project in Android Studio. Prebuilt ARM64 native binaries 
 - `DpadSettingsActivity` / `AppSettingsActivity`: per-app arrow D-pad, finger-blocking, and cursor preferences.
 - `PadSettingsOverlay` / `CenterHold`: in-game quick settings and physical-finger center dwell detection.
 - `PenUserService`: foreground app detection and injection of `SOURCE_MOUSE` / `TOOL_TYPE_MOUSE` events restricted to the selected app's UID.
+- `LaunchSession`: temporary emulation for one foreground visit, with system-panel pauses and automatic expiry.
 - `CameraInput` / `CameraConfig`: finger routing, per-app eight-direction geometry, keyboard holds and repeats, and system gesture handoff.
 - `TouchWindows`: read-only window geometry used to pass finger touches to system popups.
 - `input.c`: discovery of the physical `sec_e-pen`, exclusive evdev capture, a mouse identity, and a switch-only relay using Samsung's pen configuration.
@@ -121,6 +128,13 @@ The center-hold state check can be run without Android:
 ```powershell
 javac -d "$env:TEMP\spen-center-hold-check" app/src/main/java/dev/spenmouse/CenterHold.java checks/CenterHoldCheck.java
 java -cp "$env:TEMP\spen-center-hold-check" dev.spenmouse.CenterHoldCheck
+```
+
+The one-time launch check covers target isolation, Home/Back/Recents and app-switch exits, temporary system and lock-screen pauses, launch timeout, replacement, and Stop:
+
+```powershell
+javac -d "$env:TEMP\spen-launch-check" app/src/main/java/dev/spenmouse/LaunchSession.java checks/LaunchSessionCheck.java
+java -cp "$env:TEMP\spen-launch-check" dev.spenmouse.LaunchSessionCheck
 ```
 
 After building the APK, the preferences check verifies legacy migration, preservation of existing values, isolation between apps, defaults for new apps, and repeat migration:

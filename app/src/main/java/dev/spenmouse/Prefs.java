@@ -39,8 +39,11 @@ final class Prefs {
     static float dpadVertical(Context c,String pkg) {return get(c).getFloat(dpadKey(pkg,"vertical"),.82f);}
     static int dpadSize(Context c,String pkg) {return get(c).getInt(dpadKey(pkg,"size"),136);}
     static Bundle dpadProfiles(Context c) {
+        return dpadProfiles(c,apps(c));
+    }
+    static Bundle dpadProfiles(Context c,Set<String> packages) {
         Bundle profiles=new Bundle();
-        for(String pkg:apps(c)) {
+        for(String pkg:packages) {
             Bundle b=new Bundle();b.putBoolean("pad",dpadEnabled(c,pkg));b.putBoolean("block",dpadBlock(c,pkg));
             b.putFloat("horizontal",dpadHorizontal(c,pkg));b.putFloat("vertical",dpadVertical(c,pkg));
             b.putFloat("size",dpadSize(c,pkg));profiles.putBundle(pkg,b);
